@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <!-- SheetJS for Excel export (no encoding issues) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -298,54 +300,34 @@
     </div>
   </div>
 
-  <!-- ── 08 GOOGLE SHEETS ───────────────────────────────────────── -->
+
+  <!-- ── 08 DOWNLOADS ──────────────────────────────────────────── -->
   <div class="section-card">
     <div class="section-header">
       <div class="section-title-group">
         <span class="section-badge">08</span>
         <div>
-          <div class="section-title">Google Sheets Export</div>
-          <div class="section-subtitle">Export results to a Google Spreadsheet</div>
+          <div class="section-title">Downloads</div>
+          <div class="section-subtitle">Export your generated timetable after running the GA</div>
         </div>
       </div>
     </div>
     <div class="section-body">
       <div class="sheets-info-box">
         <div class="sheets-info-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </div>
         <div>
-          <div class="sheets-info-title">Share your sheet as <strong>Editor</strong> with this service account:</div>
-          <div class="email-box">
-            <code id="service-account-email">timetable@eloquent-clover-435616-m1.iam.gserviceaccount.com</code>
-            <button type="button" id="btn-copy-email" class="btn-icon btn-icon-edit" title="Copy email">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            </button>
+          <div class="sheets-info-title">After generating, use the <strong>CSV</strong> or <strong>Excel</strong> buttons in the results panel to download your timetable.</div>
+          <div style="margin-top:6px;font-size:0.8rem;color:var(--text-3)">
+            • <strong>CSV</strong> — UTF-8 encoded, opens correctly in Excel, Google Sheets, and any text editor.<br/>
+            • <strong>Excel (.xlsx)</strong> — Native Excel format, multiple tabs (one per batch), no encoding issues.
           </div>
-        </div>
-      </div>
-      <div class="sheets-guide">
-        <p class="guide-title">Quick Setup</p>
-        <ol class="guide-steps">
-          <li>Create or open a Google Sheet in your Drive</li>
-          <li>Click <strong>Share</strong> → paste the email above → role: <strong>Editor</strong> → Send</li>
-          <li>Copy the sheet URL and paste below</li>
-          <li>After generating, click <strong>Export to Sheets</strong> in the results</li>
-        </ol>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Google Spreadsheet URL</label>
-          <input type="text" id="input-spreadsheet-id" class="form-input" placeholder="https://docs.google.com/spreadsheets/d/..." />
-          <span class="input-hint">Paste the full URL of your shared sheet</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Drive Folder URL <span style="font-weight:400;text-transform:none;font-size:0.7rem;color:var(--text-3)">(optional)</span></label>
-          <input type="text" id="input-folder-id" class="form-input" placeholder="https://drive.google.com/drive/folders/..." />
         </div>
       </div>
     </div>
   </div>
+
 
   <!-- ── GENERATE BUTTON ────────────────────────────────────────── -->
   <button id="btn-run" class="btn-run-main">
@@ -379,7 +361,7 @@
       <span class="pill">✓ Zero Conflicts</span>
       <span class="pill">🔬 Batch Lab Scheduling</span>
       <span class="pill">📥 CSV Export</span>
-      <span class="pill">☁ Google Sheets</span>
+      <span class="pill">📊 Excel Export</span>
     </div>
   </section>
 
@@ -440,14 +422,9 @@
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             CSV
           </button>
-          <button class="btn btn-sm btn-primary" id="btn-share">
-            <span class="btn-primary__text">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-              Export to Sheets
-            </span>
-            <span class="btn-primary__loader" hidden>
-              <svg class="spinner" width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
-            </span>
+          <button class="btn btn-sm btn-primary" id="btn-export-excel">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+            Excel
           </button>
         </div>
       </div>
@@ -777,17 +754,6 @@
     });
   });
 
-  /* ── SHEETS EXPORT VALIDATION ──────────────────────────────── */
-  document.getElementById('btn-share')?.addEventListener('click', e => {
-    const ssEl = document.getElementById('input-spreadsheet-id');
-    if (ssEl && !ssEl.value.trim()) {
-      document.getElementById('sheets-section')?.scrollIntoView({ behavior:'smooth', block:'center' });
-      showToast('Please paste your Google Sheet URL first (section 08).','error');
-      ssEl.focus(); ssEl.classList.add('input-shake');
-      setTimeout(()=>ssEl.classList.remove('input-shake'),600);
-      e.stopImmediatePropagation(); e.preventDefault(); return false;
-    }
-  }, true);
 
   /* ── SYNC LUNCH DROPDOWNS WITH TIME SLOTS ─────────────────── */
   window._syncLunchDropdowns = function() {

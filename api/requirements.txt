@@ -1,2 +1,1 @@
-gspread
-google-auth
+# No external dependencies required for core GA functionality

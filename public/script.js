@@ -756,46 +756,57 @@ function buildTimetableGridRows(data) {
   return allRows;
 }
 
-// ── CSV EXPORT ────────────────────────────────────────────────────────────────
+/// ── CSV EXPORT ────────────────────────────────────────────────────────────────
+// Uses UTF-8 BOM (\uFEFF) so Excel opens the file without garbled special chars.
+// All Unicode characters (en-dash, em-dash, arrows, etc.) are preserved correctly.
 document.getElementById('btn-export')?.addEventListener('click', () => {
   if (!lastResult) return;
   const rows = buildTimetableGridRows(lastResult);
   const csv = rows.map(r =>
-    r.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')
-  ).join('\n');
+    r.map(c => `"${String(c || '').replace(/"/g, '""')}"`).join(',')
+  ).join('\r\n');
+
+  // UTF-8 BOM ensures Excel reads the file as UTF-8, not Windows-1252
+  const BOM = '\uFEFF';
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download = 'timetable.csv'; a.click();
+  a.href = URL.createObjectURL(blob);
+  a.download = 'timetable.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
 });
 
-// ── SHEETS EXPORT (Multi-Tab) ─────────────────────────────────────────────────
-document.getElementById('btn-share')?.addEventListener('click', async () => {
-  if (!lastResult) { alert('Generate a timetable first.'); return; }
-  const ssId  = (document.getElementById('input-spreadsheet-id')?.value||'').trim();
-  const fldId = (document.getElementById('input-folder-id')?.value||'').trim();
-  if (!ssId) return;
-
-  const btn     = document.getElementById('btn-share');
-  const textEl  = btn.querySelector('.btn-primary__text');
-  const loadEl  = btn.querySelector('.btn-primary__loader');
-  textEl.hidden = true; loadEl.hidden = false; btn.disabled = true;
+// ── EXCEL EXPORT ──────────────────────────────────────────────────────────────
+// Uses SheetJS (xlsx) loaded via CDN in index.html.
+// Produces a proper .xlsx file — no encoding issues at all.
+document.getElementById('btn-export-excel')?.addEventListener('click', () => {
+  if (!lastResult) return;
+  if (typeof XLSX === 'undefined') {
+    alert('SheetJS library not loaded. Check your internet connection.');
+    return;
+  }
 
   const sections = buildTimetableSections(lastResult);
-  try {
-    const res = await fetch('/api/export_google_sheets', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ sections, spreadsheet_id:ssId, folder_id:fldId }),
+  const wb = XLSX.utils.book_new();
+
+  sections.forEach(sec => {
+    const ws = XLSX.utils.aoa_to_sheet(sec.rows);
+    // Auto-size columns (approximate)
+    const colWidths = [];
+    sec.rows.forEach(row => {
+      row.forEach((cell, ci) => {
+        const len = String(cell || '').length;
+        if (!colWidths[ci] || colWidths[ci] < len) colWidths[ci] = len;
+      });
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
-    alert('Exported! Opening your sheet…');
-    window.open(data.url, '_blank');
-  } catch(e) {
-    alert('Export failed: '+e.message);
-  } finally {
-    textEl.hidden = false; loadEl.hidden = true; btn.disabled = false;
-  }
+    ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w + 2, 40) }));
+
+    // Sanitise sheet name: Excel tab names max 31 chars, no special chars
+    const safeName = String(sec.title).replace(/[:\\\/\?\*\[\]]/g, '').slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, safeName);
+  });
+
+  XLSX.writeFile(wb, 'timetable.xlsx');
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
