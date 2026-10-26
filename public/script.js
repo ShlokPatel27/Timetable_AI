@@ -384,8 +384,7 @@ btnRun.addEventListener('click', async () => {
   }
 
   btnRun.disabled = true;
-  document.querySelector('.btn-primary__text').hidden = true;
-  document.querySelector('.btn-primary__loader').hidden = false;
+  btnRun.textContent = 'Generating Timetable…';
 
   document.getElementById('results').hidden = true;
 
@@ -407,8 +406,7 @@ btnRun.addEventListener('click', async () => {
     alert('Error: ' + e.message);
   } finally {
     btnRun.disabled = false;
-    document.querySelector('.btn-primary__text').hidden = false;
-    document.querySelector('.btn-primary__loader').hidden = true;
+    btnRun.textContent = 'Generate Timetable';
   }
 });
 
@@ -439,9 +437,7 @@ function renderResults(data) {
   setupViewTabs(data);
   renderDetailTable(data.schedule);
 
-  // Show results FIRST so canvas has real dimensions, then draw chart
   document.getElementById('results').hidden = false;
-  requestAnimationFrame(() => renderChart(data.fitness_history));
 }
 
 // ── VIEW TABS ─────────────────────────────────────────────────────────────────
@@ -692,7 +688,9 @@ function buildGridForFilter(data, filterFn) {
   rows.push(['Time', ...days]);
 
   slots.forEach(slot => {
-    const row = [slot];
+    // Replace any en-dash/em-dash with standard hyphen to avoid Excel date/character encoding confusion
+    const cleanSlot = String(slot).replace(/[\u2013\u2014]/g, '-');
+    const row = [cleanSlot];
     days.forEach(day => {
       const matches = schedule.filter(e =>
         filterFn(e) && e.day === day && (e.time_label||'').startsWith(slot)
@@ -704,7 +702,9 @@ function buildGridForFilter(data, filterFn) {
           const parts = [e.course];
           if (e.faculty) parts.push(e.faculty);
           if (e.room)    parts.push(e.room);
-          if (e.type === 'lab' && e.time_label) parts.push(e.time_label);
+          if (e.type === 'lab' && e.time_label) {
+            parts.push(String(e.time_label).replace(/[\u2013\u2014]/g, '-'));
+          }
           return parts.join(' | ');
         });
         row.push(cellParts.join(' ; '));
@@ -745,20 +745,32 @@ function buildTimetableSections(data) {
 function buildTimetableGridRows(data) {
   const sections = buildTimetableSections(data);
   const days = data.days || [];
+  const totalCols = days.length + 1; // 1 column for Time + number of days
   const allRows = [];
 
-  sections.forEach(sec => {
-    allRows.push([`═══ ${sec.title.toUpperCase()} ═══`, ...days.map(() => '')]);
+  sections.forEach((sec, sIdx) => {
+    // Leave 3 blank rows between sections (starting from the 2nd section)
+    if (sIdx > 0) {
+      allRows.push(new Array(totalCols).fill(''));
+      allRows.push(new Array(totalCols).fill(''));
+      allRows.push(new Array(totalCols).fill(''));
+    }
+
+    // Center the batch title across the table columns
+    const titleRow = new Array(totalCols).fill('');
+    const midCol = Math.floor(totalCols / 2);
+    titleRow[midCol] = `=== ${sec.title.toUpperCase()} ===`;
+    allRows.push(titleRow);
+
+    // Section table rows (headers + slot rows)
     sec.rows.forEach(r => allRows.push(r));
-    allRows.push(days.map(() => '').concat(''));
   });
 
   return allRows;
 }
 
-/// ── CSV EXPORT ────────────────────────────────────────────────────────────────
+// ── CSV EXPORT ────────────────────────────────────────────────────────────────
 // Uses UTF-8 BOM (\uFEFF) so Excel opens the file without garbled special chars.
-// All Unicode characters (en-dash, em-dash, arrows, etc.) are preserved correctly.
 document.getElementById('btn-export')?.addEventListener('click', () => {
   if (!lastResult) return;
   const rows = buildTimetableGridRows(lastResult);
@@ -766,47 +778,79 @@ document.getElementById('btn-export')?.addEventListener('click', () => {
     r.map(c => `"${String(c || '').replace(/"/g, '""')}"`).join(',')
   ).join('\r\n');
 
-  // UTF-8 BOM ensures Excel reads the file as UTF-8, not Windows-1252
   const BOM = '\uFEFF';
   const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'timetable.csv';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => {
+    if (a.parentNode) document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }, 200);
 });
 
-// ── EXCEL EXPORT ──────────────────────────────────────────────────────────────
-// Uses SheetJS (xlsx) loaded via CDN in index.html.
-// Produces a proper .xlsx file — no encoding issues at all.
-document.getElementById('btn-export-excel')?.addEventListener('click', () => {
-  if (!lastResult) return;
-  if (typeof XLSX === 'undefined') {
-    alert('SheetJS library not loaded. Check your internet connection.');
+// ── HELPER: LOAD SHEETJS DYNAMICALLY IF NEEDED ────────────────────────────────
+function ensureSheetJS(callback) {
+  if (typeof XLSX !== 'undefined') {
+    callback(null, window.XLSX);
     return;
   }
+  const s1 = document.createElement('script');
+  s1.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+  s1.onload = () => callback(null, window.XLSX);
+  s1.onerror = () => {
+    const s2 = document.createElement('script');
+    s2.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s2.onload = () => callback(null, window.XLSX);
+    s2.onerror = () => callback(new Error('Failed to load SheetJS library.'));
+    document.head.appendChild(s2);
+  };
+  document.head.appendChild(s1);
+}
 
-  const sections = buildTimetableSections(lastResult);
-  const wb = XLSX.utils.book_new();
+// ── EXCEL EXPORT ──────────────────────────────────────────────────────────────
+document.getElementById('btn-export-excel')?.addEventListener('click', () => {
+  if (!lastResult) {
+    alert('Please generate a timetable first.');
+    return;
+  }
+  const btn = document.getElementById('btn-export-excel');
+  const originalHtml = btn ? btn.innerHTML : 'Excel';
+  if (btn) btn.textContent = 'Exporting…';
 
-  sections.forEach(sec => {
-    const ws = XLSX.utils.aoa_to_sheet(sec.rows);
-    // Auto-size columns (approximate)
-    const colWidths = [];
-    sec.rows.forEach(row => {
-      row.forEach((cell, ci) => {
-        const len = String(cell || '').length;
-        if (!colWidths[ci] || colWidths[ci] < len) colWidths[ci] = len;
+  ensureSheetJS((err, xlsxLib) => {
+    if (btn) btn.innerHTML = originalHtml;
+    if (err || !xlsxLib) {
+      alert('Could not load Excel export library. Please check your internet connection.');
+      return;
+    }
+
+    try {
+      const sections = buildTimetableSections(lastResult);
+      const wb = xlsxLib.utils.book_new();
+
+      sections.forEach(sec => {
+        const ws = xlsxLib.utils.aoa_to_sheet(sec.rows);
+        const colWidths = [];
+        sec.rows.forEach(row => {
+          row.forEach((cell, ci) => {
+            const len = String(cell || '').length;
+            if (!colWidths[ci] || colWidths[ci] < len) colWidths[ci] = len;
+          });
+        });
+        ws['!cols'] = colWidths.map(w => ({ wch: Math.min(Math.max(w + 3, 10), 45) }));
+
+        const safeName = String(sec.title).replace(/[:\\\/\?\*\[\]]/g, '').slice(0, 31);
+        xlsxLib.utils.book_append_sheet(wb, ws, safeName);
       });
-    });
-    ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w + 2, 40) }));
 
-    // Sanitise sheet name: Excel tab names max 31 chars, no special chars
-    const safeName = String(sec.title).replace(/[:\\\/\?\*\[\]]/g, '').slice(0, 31);
-    XLSX.utils.book_append_sheet(wb, ws, safeName);
+      xlsxLib.writeFile(wb, 'timetable.xlsx');
+    } catch (e) {
+      alert('Failed to generate Excel file: ' + e.message);
+    }
   });
-
-  XLSX.writeFile(wb, 'timetable.xlsx');
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
