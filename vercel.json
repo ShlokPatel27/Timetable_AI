@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/run", "destination": "/api/index.py" },
+    { "source": "/api/export_google_sheets", "destination": "/api/export_google_sheets.py" },
+    { "source": "/", "destination": "/public/index.html" },
+    { "source": "/(.*)", "destination": "/public/$1" }
+  ]
+}

@@ -1,0 +1,204 @@
+import json
+import os
+import re
+import sys
+from http.server import BaseHTTPRequestHandler
+
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSPREAD_AVAILABLE = True
+except ImportError:
+    GSPREAD_AVAILABLE = False
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def _extract_id(value):
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    m = re.search(r'/d/([a-zA-Z0-9_-]+)', value)
+    if m:
+        return m.group(1)
+    m = re.search(r'/folders/([a-zA-Z0-9_-]+)', value)
+    if m:
+        return m.group(1)
+    if re.match(r'^[a-zA-Z0-9_-]{10,}$', value):
+        return value
+    return value
+
+def _format_worksheet(worksheet, rows):
+    """Apply professional formatting to a worksheet in minimal API calls."""
+    num_rows = len(rows)
+    if num_rows == 0:
+        return
+    num_cols = max(len(r) for r in rows) if rows else 1
+    col_letter = chr(ord('A') + min(num_cols - 1, 25))
+
+    # Build all formatting in one batch call
+    formats = []
+
+    # 0. RESET: Clear ALL old formatting on a large range (covers previous exports)
+    formats.append({
+        "range": f"A1:{col_letter}100",
+        "format": {
+            "backgroundColor": {"red": 1, "green": 1, "blue": 1},
+            "textFormat": {
+                "foregroundColor": {"red": 0, "green": 0, "blue": 0},
+                "bold": False,
+                "fontSize": 10,
+            },
+            "horizontalAlignment": "LEFT",
+        }
+    })
+
+    # 1. Center the actual data range
+    formats.append({
+        "range": f"A1:{col_letter}{num_rows}",
+        "format": {
+            "horizontalAlignment": "CENTER",
+            "verticalAlignment": "MIDDLE",
+            "textFormat": {"fontSize": 10},
+        }
+    })
+
+    # 2. Navy header row
+    formats.append({
+        "range": f"A1:{col_letter}1",
+        "format": {
+            "backgroundColor": {"red": 0.15, "green": 0.15, "blue": 0.45},
+            "textFormat": {
+                "foregroundColor": {"red": 1, "green": 1, "blue": 1},
+                "bold": True,
+                "fontSize": 11,
+            },
+        }
+    })
+
+    # 3. Alternating row colors (batched)
+    for i in range(1, num_rows):
+        row_idx = i + 1
+        if i % 2 == 0:
+            formats.append({
+                "range": f"A{row_idx}:{col_letter}{row_idx}",
+                "format": {
+                    "backgroundColor": {"red": 0.95, "green": 0.96, "blue": 1.0}
+                }
+            })
+
+    # Single API call for ALL formatting
+    worksheet.batch_format(formats)
+
+
+
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+        payload = json.loads(post_data.decode('utf-8'))
+
+        # Support both old format (rows) and new format (sections)
+        sections = payload.get("sections", [])
+        csv_rows = payload.get("rows", [])
+        raw_folder = payload.get("folder_id")
+        raw_spreadsheet = payload.get("spreadsheet_id")
+
+        folder_id = _extract_id(raw_folder)
+        spreadsheet_id = _extract_id(raw_spreadsheet)
+
+        try:
+            if not GSPREAD_AVAILABLE:
+                raise Exception("gspread library is not installed.")
+
+            # ── Authenticate ──
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            creds_path = os.path.join(root_dir, 'credentials.json')
+
+            if not os.path.exists(creds_path):
+                creds_json_content = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+                if creds_json_content:
+                    creds_info = json.loads(creds_json_content)
+                    scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+                    credentials = Credentials.from_service_account_info(creds_info, scopes=scopes)
+                else:
+                    raise Exception("Missing credentials.json for Google Sheets API authentication.")
+            else:
+                scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+                credentials = Credentials.from_service_account_file(creds_path, scopes=scopes)
+
+            gc = gspread.authorize(credentials)
+
+            # ── Open or create spreadsheet ──
+            if spreadsheet_id:
+                try:
+                    sh = gc.open_by_key(spreadsheet_id)
+                except gspread.exceptions.APIError as e:
+                    body = str(e).lower()
+                    if "invalid" in body and "argument" in body:
+                        raise Exception(f"The ID ('{spreadsheet_id}') is not a valid Spreadsheet ID.")
+                    raise e
+            else:
+                try:
+                    sh = gc.create("University Timetable (Generated by GA)", folder_id=folder_id)
+                except gspread.exceptions.APIError as e:
+                    if "quota" in str(e).lower():
+                        raise Exception("Google Drive storage quota exceeded.")
+                    raise e
+
+            if not spreadsheet_id:
+                sh.share(None, role='reader', type='anyone')
+
+            # ══════════════════════════════════════════════════════
+            # MULTI-TAB EXPORT (new format with sections)
+            # ══════════════════════════════════════════════════════
+            if sections and len(sections) > 0:
+                existing = {ws.title: ws for ws in sh.worksheets()}
+
+                for idx, section in enumerate(sections):
+                    title = section.get("title", f"Sheet {idx + 1}")
+                    rows = section.get("rows", [])
+
+                    if title in existing:
+                        # Reuse existing sheet
+                        ws = existing[title]
+                        ws.clear()
+                    elif idx == 0 and "Sheet1" in existing:
+                        # Rename default "Sheet1" to our first section title
+                        ws = existing["Sheet1"]
+                        ws.update_title(title)
+                        ws.clear()
+                        del existing["Sheet1"]
+                    else:
+                        # Create new sheet
+                        ws = sh.add_worksheet(title=title, rows=max(len(rows) + 5, 20), cols=10)
+
+                    existing[title] = ws
+
+                    if rows:
+                        ws.update(values=rows, range_name='A1')
+                        _format_worksheet(ws, rows)
+
+            # ══════════════════════════════════════════════════════
+            # LEGACY SINGLE-SHEET EXPORT (old format with rows)
+            # ══════════════════════════════════════════════════════
+            elif csv_rows:
+                worksheet = sh.get_worksheet(0)
+                if spreadsheet_id:
+                    worksheet.clear()
+                worksheet.update(values=csv_rows, range_name='A1')
+                _format_worksheet(worksheet, csv_rows)
+
+            response_data = {"url": sh.url}
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data).encode("utf-8"))
+
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))

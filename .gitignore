@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs and debug
+*.log
+fitness_convergence.png
+
+# Vercel
+.vercel
+node_modules/
+
+# Local env
+.env
+.venv/
+env/
+venv/
+
+# Google API
+credentials.json
+# credentials.json.example

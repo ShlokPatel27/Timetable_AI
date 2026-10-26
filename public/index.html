@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TimetableAI — College Scheduler</title>
+  <meta name="description" content="Production-level college timetable scheduling with Genetic Algorithm. Theory, labs, batches, faculty constraints." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ─── NAVBAR ───────────────────────────────────────────────────── -->
+<nav class="navbar" id="navbar">
+  <div class="nav-left">
+    <svg class="logo-icon" width="30" height="30" viewBox="0 0 100 100" fill="none">
+      <rect x="10" y="10" width="30" height="30" rx="6" fill="var(--primary)"/>
+      <rect x="10" y="60" width="30" height="30" rx="6" fill="var(--lab)"/>
+      <rect x="60" y="10" width="30" height="30" rx="6" fill="var(--success)"/>
+      <rect x="60" y="60" width="30" height="30" rx="6" fill="var(--accent)"/>
+      <line x1="25" y1="40" x2="25" y2="60" stroke="var(--border-2)" stroke-width="3"/>
+      <line x1="75" y1="40" x2="75" y2="60" stroke="var(--border-2)" stroke-width="3"/>
+      <line x1="40" y1="25" x2="60" y2="25" stroke="var(--border-2)" stroke-width="3"/>
+      <line x1="40" y1="75" x2="60" y2="75" stroke="var(--border-2)" stroke-width="3"/>
+    </svg>
+    <span class="logo-text">Timetable<span class="accent">AI</span></span>
+  </div>
+  <div class="nav-center">
+    <div class="status-pill" id="app-status-pill" data-status="idle">
+      <span class="status-dot"></span>
+      <span id="app-status-text">Ready</span>
+      <span id="elapsed-display" class="elapsed" hidden></span>
+    </div>
+  </div>
+  <div class="nav-right">
+    <span class="version-label">GA Engine v3</span>
+    <button class="shortcut-pill" id="btn-shortcut" title="Ctrl+Enter to run">
+      <kbd>Ctrl</kbd><kbd>↵</kbd>
+    </button>
+  </div>
+</nav>
+
+<!-- ─── MAIN ─────────────────────────────────────────────────────── -->
+<main class="container">
+
+  <!-- Page header -->
+  <div class="page-header">
+    <div class="page-header-icon">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    </div>
+    <div class="page-header-text">
+      <h1>Schedule <span class="accent">Configuration</span></h1>
+      <p>Define your courses, labs, rooms, and constraints — the Genetic Algorithm handles the rest.</p>
+    </div>
+  </div>
+
+  <!-- ── 01 SCHEDULE BASICS ─────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">01</span>
+        <div>
+          <div class="section-title">Schedule Basics</div>
+          <div class="section-subtitle">Working days and time slots</div>
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <!-- Days -->
+      <div class="form-group">
+        <label class="form-label">Working Days</label>
+        <div class="days-grid" id="days-grid">
+          <button class="day-toggle active" data-day="Mon">Mon</button>
+          <button class="day-toggle active" data-day="Tue">Tue</button>
+          <button class="day-toggle active" data-day="Wed">Wed</button>
+          <button class="day-toggle active" data-day="Thu">Thu</button>
+          <button class="day-toggle active" data-day="Fri">Fri</button>
+          <button class="day-toggle" data-day="Sat">Sat</button>
+          <button class="day-toggle" data-day="Sun">Sun</button>
+        </div>
+      </div>
+
+      <!-- Time Slots -->
+      <div class="form-group">
+        <label class="form-label">Time Slots (1-hour each)</label>
+        <div class="slots-container" id="slots-container">
+          <span class="slot-tag">8-9 <button onclick="removeSlot('8-9')" title="Remove">×</button></span>
+          <span class="slot-tag">9-10 <button onclick="removeSlot('9-10')" title="Remove">×</button></span>
+          <span class="slot-tag">10-11 <button onclick="removeSlot('10-11')" title="Remove">×</button></span>
+          <span class="slot-tag">11-12 <button onclick="removeSlot('11-12')" title="Remove">×</button></span>
+          <span class="slot-tag">12-1 <button onclick="removeSlot('12-1')" title="Remove">×</button></span>
+          <span class="slot-tag">1-2 <button onclick="removeSlot('1-2')" title="Remove">×</button></span>
+          <span class="slot-tag">2-3 <button onclick="removeSlot('2-3')" title="Remove">×</button></span>
+          <span class="slot-tag">3-4 <button onclick="removeSlot('3-4')" title="Remove">×</button></span>
+        </div>
+        <div class="slot-add-inline">
+          <input type="text" id="slot-input" placeholder="e.g. 4-5" maxlength="8" />
+          <button class="btn btn-sm btn-secondary" onclick="addSlot()">+ Add Slot</button>
+        </div>
+      </div>
+
+      <!-- Batches -->
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Batches (Lab groups)</label>
+        <div class="batch-tags" id="batch-tags">
+          <span class="batch-tag">Batch A <button onclick="removeBatch('Batch A')" title="Remove">×</button></span>
+          <span class="batch-tag">Batch B <button onclick="removeBatch('Batch B')" title="Remove">×</button></span>
+          <span class="batch-tag">Batch C <button onclick="removeBatch('Batch C')" title="Remove">×</button></span>
+        </div>
+        <div class="batch-add-inline">
+          <input type="text" id="batch-input" placeholder="Batch name" maxlength="20" />
+          <button class="btn btn-sm btn-secondary" onclick="addBatch()">+ Add Batch</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 02 THEORY COURSES ──────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">02</span>
+        <div>
+          <div class="section-title">Theory Courses</div>
+          <div class="section-subtitle">Whole division attends · Credits = weekly 1-hr sessions</div>
+        </div>
+      </div>
+      <span class="item-row-badge badge-theory">Theory Sessions</span>
+    </div>
+    <div class="section-body">
+      <div class="item-list" id="theory-list"></div>
+      <button class="add-area" onclick="openModal('theory')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Theory Course
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 03 LAB COURSES ─────────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">03</span>
+        <div>
+          <div class="section-title">Lab Courses</div>
+          <div class="section-subtitle">Each batch gets a 2-hour session · Scheduled in dedicated lab rooms</div>
+        </div>
+      </div>
+      <span class="item-row-badge badge-lab">Lab · 2hr/batch</span>
+    </div>
+    <div class="section-body">
+      <div class="item-list" id="lab-list"></div>
+      <button class="add-area" onclick="openModal('lab')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Lab Course
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 04 THEORY ROOMS ────────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">04</span>
+        <div>
+          <div class="section-title">Theory Rooms</div>
+          <div class="section-subtitle">Used for theory sessions only</div>
+        </div>
+      </div>
+      <span class="item-row-badge badge-room">Classrooms</span>
+    </div>
+    <div class="section-body">
+      <div class="item-list" id="theory-rooms-list"></div>
+      <button class="add-area" onclick="openModal('theory-room')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Theory Room
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 05 LAB ROOMS ───────────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">05</span>
+        <div>
+          <div class="section-title">Lab Rooms</div>
+          <div class="section-subtitle">Dedicated rooms mapped to a specific lab subject</div>
+        </div>
+      </div>
+      <span class="item-row-badge badge-labroom">Dedicated</span>
+    </div>
+    <div class="section-body">
+      <div class="item-list" id="lab-rooms-list"></div>
+      <button class="add-area" onclick="openModal('lab-room')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Lab Room
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 06 CONSTRAINTS ────────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">06</span>
+        <div>
+          <div class="section-title">Scheduling Constraints</div>
+          <div class="section-subtitle">Lunch window, time preferences, and hard constraints</div>
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="constraints-grid">
+        <div class="form-group">
+          <label class="form-label">Lunch Window — Start Slot</label>
+          <select id="input-lunch-start" class="form-select">
+            <option value="12-1">12-1</option>
+          </select>
+          <span class="form-hint">At least one slot in this range will be kept free</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Lunch Window — End Slot</label>
+          <select id="input-lunch-end" class="form-select">
+            <option value="1-2">1-2</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Theory Time Preference</label>
+          <select id="input-theory-pref" class="form-select">
+            <option value="unbiased">Unbiased (any time)</option>
+            <option value="morning" selected>Morning (first third)</option>
+            <option value="afternoon">Afternoon (middle third)</option>
+            <option value="evening">Evening (last third)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Lab Time Preference</label>
+          <select id="input-lab-pref" class="form-select">
+            <option value="unbiased" selected>Unbiased (any time)</option>
+            <option value="morning">Morning (first third)</option>
+            <option value="afternoon">Afternoon (middle third)</option>
+            <option value="evening">Evening (last third)</option>
+          </select>
+        </div>
+      </div>
+      <div class="constraint-chips">
+        <span class="constraint-chip">✓ No faculty double-booking</span>
+        <span class="constraint-chip">✓ Dedicated lab rooms enforced</span>
+        <span class="constraint-chip">✓ 2-hour consecutive lab blocks</span>
+        <span class="constraint-chip">✓ No course repeated same day</span>
+        <span class="constraint-chip">✓ Theory / lab room segregation</span>
+        <span class="constraint-chip">✓ Lunch window free slot</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 07 GA PARAMETERS ───────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">07</span>
+        <div>
+          <div class="section-title">GA Parameters</div>
+          <div class="section-subtitle">Genetic Algorithm tuning</div>
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <details class="accordion">
+        <summary class="accordion-trigger">
+          <span>Advanced Settings</span>
+          <svg class="accordion-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </summary>
+        <div class="accordion-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Population Size</label>
+              <input type="number" id="input-pop-size" class="form-input" value="100" min="10" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max Generations</label>
+              <input type="number" id="input-max-generations" class="form-input" value="500" min="10" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mutation Rate</label>
+              <input type="number" id="input-mutation-rate" class="form-input" step="0.01" value="0.05" min="0" max="1" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Crossover Rate</label>
+              <input type="number" id="input-crossover-rate" class="form-input" step="0.05" value="0.80" min="0" max="1" />
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- ── 08 GOOGLE SHEETS ───────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">08</span>
+        <div>
+          <div class="section-title">Google Sheets Export</div>
+          <div class="section-subtitle">Export results to a Google Spreadsheet</div>
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="sheets-info-box">
+        <div class="sheets-info-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div>
+          <div class="sheets-info-title">Share your sheet as <strong>Editor</strong> with this service account:</div>
+          <div class="email-box">
+            <code id="service-account-email">timetable@eloquent-clover-435616-m1.iam.gserviceaccount.com</code>
+            <button type="button" id="btn-copy-email" class="btn-icon btn-icon-edit" title="Copy email">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="sheets-guide">
+        <p class="guide-title">Quick Setup</p>
+        <ol class="guide-steps">
+          <li>Create or open a Google Sheet in your Drive</li>
+          <li>Click <strong>Share</strong> → paste the email above → role: <strong>Editor</strong> → Send</li>
+          <li>Copy the sheet URL and paste below</li>
+          <li>After generating, click <strong>Export to Sheets</strong> in the results</li>
+        </ol>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Google Spreadsheet URL</label>
+          <input type="text" id="input-spreadsheet-id" class="form-input" placeholder="https://docs.google.com/spreadsheets/d/..." />
+          <span class="input-hint">Paste the full URL of your shared sheet</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Drive Folder URL <span style="font-weight:400;text-transform:none;font-size:0.7rem;color:var(--text-3)">(optional)</span></label>
+          <input type="text" id="input-folder-id" class="form-input" placeholder="https://drive.google.com/drive/folders/..." />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GENERATE BUTTON ────────────────────────────────────────── -->
+  <button id="btn-run" class="btn-run-main">
+    <span class="btn-primary__text">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Generate Timetable
+    </span>
+    <span class="btn-primary__loader" hidden>
+      <svg class="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+      Running GA…
+    </span>
+  </button>
+
+  <!-- ── IDLE HERO ──────────────────────────────────────────────── -->
+  <section id="idle-state" class="hero" style="margin-top: 32px;">
+    <div class="hero-visual">
+      <svg class="dna-helix" width="100" height="140" viewBox="0 0 120 160" fill="none">
+        <circle class="dna-dot d1" cx="30" cy="20" r="5" fill="var(--primary)"/>
+        <circle class="dna-dot d2" cx="90" cy="20" r="5" fill="var(--lab)"/>
+        <circle class="dna-dot d5" cx="90" cy="80" r="5" fill="var(--primary)"/>
+        <circle class="dna-dot d6" cx="30" cy="80" r="5" fill="var(--lab)"/>
+        <circle class="dna-dot d9" cx="30" cy="140" r="5" fill="var(--primary)"/>
+        <circle class="dna-dot d10" cx="90" cy="140" r="5" fill="var(--lab)"/>
+        <path d="M30 20 Q60 50 90 80 Q60 110 30 140" stroke="var(--primary)" stroke-width="2" fill="none" opacity="0.4"/>
+        <path d="M90 20 Q60 50 30 80 Q60 110 90 140" stroke="var(--lab)" stroke-width="2" fill="none" opacity="0.4"/>
+      </svg>
+    </div>
+    <h2 class="hero-title">Ready to <span class="accent">Evolve</span></h2>
+    <p class="hero-sub">Add your courses, rooms, and constraints above — then click Generate.</p>
+    <div class="hero-pills">
+      <span class="pill">✓ Zero Conflicts</span>
+      <span class="pill">🔬 Batch Lab Scheduling</span>
+      <span class="pill">📥 CSV Export</span>
+      <span class="pill">☁ Google Sheets</span>
+    </div>
+  </section>
+
+  <!-- ── SKELETON ───────────────────────────────────────────────── -->
+  <section id="skeleton-container" class="skeleton-section" hidden>
+    <div class="skeleton-status"><span class="skeleton-evolving">⚙ Evolving optimal timetable…</span></div>
+    <div class="skeleton-stats">
+      <div class="skeleton-card"></div><div class="skeleton-card"></div>
+      <div class="skeleton-card"></div><div class="skeleton-card"></div>
+    </div>
+    <div class="skeleton-grid"></div>
+    <div class="skeleton-row-pair">
+      <div class="skeleton-block"></div><div class="skeleton-block"></div>
+    </div>
+  </section>
+
+  <!-- ── RESULTS ────────────────────────────────────────────────── -->
+  <div id="results" hidden style="margin-top: 32px;">
+
+    <!-- Stats -->
+    <div class="stats-bar anim-section">
+      <div class="stat-card" id="stat-gen">
+        <div class="stat-card__label">Generations</div>
+        <span class="stat-card__value">—</span>
+        <span class="stat-card__icon">📊</span>
+      </div>
+      <div class="stat-card" id="stat-violations">
+        <div class="stat-card__label">Violations</div>
+        <span class="stat-card__value">—</span>
+        <span class="stat-card__icon">⚠️</span>
+      </div>
+      <div class="stat-card" id="stat-theory">
+        <div class="stat-card__label">Theory Sessions</div>
+        <span class="stat-card__value">—</span>
+        <span class="stat-card__icon">📚</span>
+      </div>
+      <div class="stat-card" id="stat-lab">
+        <div class="stat-card__label">Lab Sessions</div>
+        <span class="stat-card__value">—</span>
+        <span class="stat-card__icon">🔬</span>
+      </div>
+    </div>
+
+    <!-- Violations -->
+    <div class="result-panel anim-section" id="violations-panel" hidden>
+      <div class="result-panel-header">
+        <span class="result-panel-title" style="color:var(--danger)">⚠ Constraint Violations</span>
+      </div>
+      <ul id="violations-list" class="violations-list"></ul>
+    </div>
+
+    <!-- Timetable Grid -->
+    <div class="result-panel anim-section">
+      <div class="result-panel-header">
+        <span class="result-panel-title">Timetable Grid</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-secondary" id="btn-export">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            CSV
+          </button>
+          <button class="btn btn-sm btn-primary" id="btn-share">
+            <span class="btn-primary__text">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+              Export to Sheets
+            </span>
+            <span class="btn-primary__loader" hidden>
+              <svg class="spinner" width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+            </span>
+          </button>
+        </div>
+      </div>
+      <div class="result-panel-body">
+        <div class="view-tabs">
+          <button class="view-tab active" data-view="day">By Day</button>
+          <button class="view-tab" data-view="room">By Room</button>
+          <button class="view-tab" data-view="batch">By Batch</button>
+        </div>
+        <div class="entity-selector"><div class="entity-pills" id="entity-pills"></div></div>
+        <div class="table-wrap">
+          <table id="timetable" class="timetable"></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schedule Detail -->
+    <div class="result-panel anim-section">
+      <div class="result-panel-header">
+        <span class="result-panel-title">Schedule Detail</span>
+        <input type="text" id="detail-filter" class="filter-input" placeholder="Filter sessions…" />
+      </div>
+      <div class="table-wrap" style="padding:0;">
+        <table id="schedule-detail" class="detail-table">
+          <thead>
+            <tr>
+              <th data-sort="0">Type</th>
+              <th data-sort="1">Course</th>
+              <th data-sort="2">Faculty</th>
+              <th data-sort="3">Batch</th>
+              <th data-sort="4">Day</th>
+              <th data-sort="5">Time</th>
+              <th data-sort="6">Room</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Chart + Config -->
+    <div class="two-col anim-section">
+      <div class="result-panel">
+        <div class="result-panel-header"><span class="result-panel-title">GA Convergence</span></div>
+        <div class="chart-wrap"><canvas id="chart" height="240"></canvas></div>
+      </div>
+      <div class="result-panel">
+        <div class="result-panel-header"><span class="result-panel-title">Configuration Summary</span></div>
+        <div class="config-grid-output" id="config-grid"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer class="footer">
+    TimetableAI &copy; 2026 · Production Genetic Algorithm Scheduler
+  </footer>
+</main>
+
+<!-- ─── TOAST ────────────────────────────────────────────────────── -->
+<div id="toast-container" aria-live="polite"></div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     MODALS
+     ════════════════════════════════════════════════════════════════ -->
+
+<!-- Theory Course Modal -->
+<div class="modal-overlay" id="modal-theory" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-theory-title">Add Theory Course</span>
+      <button class="modal-close" onclick="closeModal('theory')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="theory-edit-idx" value="-1" />
+      <div class="form-group">
+        <label class="form-label">Course Name</label>
+        <input type="text" id="theory-name" class="form-input" placeholder="e.g. Mathematics" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Faculty Name</label>
+          <input type="text" id="theory-faculty" class="form-input" placeholder="e.g. Prof. Sharma" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Credits (hours/week)</label>
+          <input type="number" id="theory-credits" class="form-input" min="1" max="10" value="3" />
+          <span class="form-hint">Number of 1-hr sessions per week</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('theory')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTheoryCourse()">Save Course</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lab Course Modal -->
+<div class="modal-overlay" id="modal-lab" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-lab-title">Add Lab Course</span>
+      <button class="modal-close" onclick="closeModal('lab')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="lab-edit-idx" value="-1" />
+      <div class="form-group">
+        <label class="form-label">Lab Course Name</label>
+        <input type="text" id="lab-name" class="form-input" placeholder="e.g. Physics Lab" />
+        <span class="form-hint">This name must match the Lab Room subject exactly</span>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Faculty Name</label>
+          <input type="text" id="lab-faculty" class="form-input" placeholder="e.g. Prof. Patel" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Dedicated Lab Room</label>
+          <input type="text" id="lab-room-name" class="form-input" placeholder="e.g. Physics Lab Room" />
+          <span class="form-hint">Must match a Lab Room name in section 05</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Batches</label>
+        <p style="font-size:0.8rem;color:var(--text-2);">All batches defined in section 01 will be assigned this lab automatically.</p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('lab')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveLabCourse()">Save Lab</button>
+    </div>
+  </div>
+</div>
+
+<!-- Theory Room Modal -->
+<div class="modal-overlay" id="modal-theory-room" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-theory-room-title">Add Theory Room</span>
+      <button class="modal-close" onclick="closeModal('theory-room')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="theory-room-edit-idx" value="-1" />
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Room Name</label>
+          <input type="text" id="theory-room-name" class="form-input" placeholder="e.g. Lecture Hall A" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Seating Capacity</label>
+          <input type="number" id="theory-room-cap" class="form-input" min="1" value="60" />
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('theory-room')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTheoryRoom()">Save Room</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lab Room Modal -->
+<div class="modal-overlay" id="modal-lab-room" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-lab-room-title">Add Lab Room</span>
+      <button class="modal-close" onclick="closeModal('lab-room')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="lab-room-edit-idx" value="-1" />
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Room Name</label>
+          <input type="text" id="lab-room-name-field" class="form-input" placeholder="e.g. Computer Lab" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Subject (Lab Course Name)</label>
+          <input type="text" id="lab-room-subject" class="form-input" placeholder="e.g. CS Lab" />
+          <span class="form-hint">Must exactly match the Lab Course name</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('lab-room')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveLabRoom()">Save Room</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SCRIPTS ───────────────────────────────────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="script.js?v=4.0"></script>
+
+<script>
+(function() {
+  'use strict';
+
+  /* ── TOAST ─────────────────────────────────────────────────── */
+  const toastBox = document.getElementById('toast-container');
+  let toastCount = 0;
+  window.showToast = function(msg, type) {
+    type = type || 'info';
+    if (toastCount >= 3) { const o = toastBox.firstChild; if (o) { o.remove(); toastCount--; } }
+    const t = document.createElement('div');
+    t.className = 'toast toast--' + type;
+    t.innerHTML = `<span class="toast-icon">${type==='error'?'✕':'✓'}</span>
+      <span class="toast-msg">${msg}</span>
+      <button class="toast-close" onclick="this.closest('.toast').remove(); toastCount--">&times;</button>
+      <div class="toast-progress"></div>`;
+    toastBox.appendChild(t); toastCount++;
+    setTimeout(() => {
+      t.classList.add('toast--out');
+      setTimeout(() => { if (t.parentNode) { t.remove(); toastCount--; } }, 300);
+    }, 5000);
+  };
+  window.alert = function(msg) {
+    const m = String(msg).substring(0, 220);
+    showToast(m, /error|fail|missing|invalid|wrong/i.test(m) ? 'error' : 'success');
+  };
+
+  /* ── APP STATE ─────────────────────────────────────────────── */
+  const btnRun     = document.getElementById('btn-run');
+  const statusPill = document.getElementById('app-status-pill');
+  const statusText = document.getElementById('app-status-text');
+  const elapsedEl  = document.getElementById('elapsed-display');
+  const idleState  = document.getElementById('idle-state');
+  const skeleton   = document.getElementById('skeleton-container');
+  const results    = document.getElementById('results');
+  let elapsedInterval = null, startTime = 0;
+
+  window.setAppState = function(state) {
+    statusPill.setAttribute('data-status', state);
+    if (state === 'running') {
+      statusText.textContent = 'Running GA…';
+      startTime = Date.now(); elapsedEl.hidden = false; elapsedEl.textContent = '0s';
+      elapsedInterval = setInterval(() => { elapsedEl.textContent = Math.floor((Date.now()-startTime)/1000)+'s'; }, 500);
+      if (idleState) idleState.hidden = true;
+      skeleton.hidden = false; results.hidden = true;
+    } else if (state === 'done') {
+      clearInterval(elapsedInterval);
+      statusText.textContent = 'Done';
+      elapsedEl.textContent = Math.floor((Date.now()-startTime)/1000)+'s';
+      skeleton.hidden = true;
+      results.querySelectorAll('.anim-section').forEach((s,i) => {
+        s.style.animationDelay = (i*0.07)+'s';
+        s.classList.add('anim-enter');
+      });
+    } else if (state === 'error') {
+      clearInterval(elapsedInterval); statusText.textContent = 'Failed';
+      elapsedEl.hidden = true; skeleton.hidden = true;
+      if (idleState) idleState.hidden = false;
+    } else {
+      clearInterval(elapsedInterval); statusText.textContent = 'Ready';
+      elapsedEl.hidden = true; skeleton.hidden = true;
+    }
+  };
+
+  if (btnRun) {
+    new MutationObserver(() => {
+      const v = document.querySelector('#stat-violations .stat-card__value');
+      if (btnRun.disabled) setAppState('running');
+      else if (v && v.textContent !== '—') setAppState('done');
+      else setAppState('idle');
+    }).observe(btnRun, { attributes: true, attributeFilter: ['disabled'] });
+  }
+
+  /* ── KEYBOARD SHORTCUT ─────────────────────────────────────── */
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey||e.metaKey) && e.key==='Enter') { e.preventDefault(); if (btnRun&&!btnRun.disabled) btnRun.click(); }
+  });
+  document.getElementById('btn-shortcut')?.addEventListener('click', () => { if (btnRun&&!btnRun.disabled) btnRun.click(); });
+
+  /* ── VIOLATIONS COLOR ──────────────────────────────────────── */
+  const violCard = document.querySelector('#stat-violations .stat-card__value');
+  if (violCard) {
+    new MutationObserver(() => {
+      const v = parseInt(violCard.textContent);
+      if (!isNaN(v)) {
+        violCard.style.color = v===0 ? 'var(--success)' : 'var(--danger)';
+        if (v===0) showToast('Perfect timetable — zero conflicts!','success');
+      }
+    }).observe(violCard, { childList: true });
+  }
+
+  /* ── SMOOTH SCROLL TO RESULTS ──────────────────────────────── */
+  new MutationObserver(() => {
+    if (!results.hidden) setTimeout(() => results.scrollIntoView({ behavior:'smooth', block:'start' }), 120);
+  }).observe(results, { attributes: true, attributeFilter: ['hidden'] });
+
+  /* ── COPY EMAIL ────────────────────────────────────────────── */
+  document.getElementById('btn-copy-email')?.addEventListener('click', () => {
+    const email = document.getElementById('service-account-email').textContent;
+    navigator.clipboard.writeText(email).then(() => showToast('Email copied!','success')).catch(() => {
+      const ta = document.createElement('textarea');
+      ta.value = email; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+      showToast('Email copied!','success');
+    });
+  });
+
+  /* ── DETAIL FILTER ─────────────────────────────────────────── */
+  document.getElementById('detail-filter')?.addEventListener('input', function() {
+    const q = this.value.toLowerCase();
+    document.querySelectorAll('#schedule-detail tbody tr').forEach(r => {
+      r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+
+  /* ── SORTABLE HEADER ───────────────────────────────────────── */
+  const sortDir = {};
+  document.querySelectorAll('#schedule-detail thead th[data-sort]').forEach(th => {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', () => {
+      const idx = parseInt(th.dataset.sort);
+      const tbody = document.querySelector('#schedule-detail tbody');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      sortDir[idx] = !sortDir[idx];
+      rows.sort((a,b) => {
+        const aT = a.cells[idx]?.textContent||'';
+        const bT = b.cells[idx]?.textContent||'';
+        return sortDir[idx] ? aT.localeCompare(bT) : bT.localeCompare(aT);
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      document.querySelectorAll('#schedule-detail thead th').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+      th.classList.add(sortDir[idx]?'sort-asc':'sort-desc');
+    });
+  });
+
+  /* ── SHEETS EXPORT VALIDATION ──────────────────────────────── */
+  document.getElementById('btn-share')?.addEventListener('click', e => {
+    const ssEl = document.getElementById('input-spreadsheet-id');
+    if (ssEl && !ssEl.value.trim()) {
+      document.getElementById('sheets-section')?.scrollIntoView({ behavior:'smooth', block:'center' });
+      showToast('Please paste your Google Sheet URL first (section 08).','error');
+      ssEl.focus(); ssEl.classList.add('input-shake');
+      setTimeout(()=>ssEl.classList.remove('input-shake'),600);
+      e.stopImmediatePropagation(); e.preventDefault(); return false;
+    }
+  }, true);
+
+  /* ── SYNC LUNCH DROPDOWNS WITH TIME SLOTS ─────────────────── */
+  window._syncLunchDropdowns = function() {
+    const slots = window._getSlots ? window._getSlots() : [];
+    ['input-lunch-start','input-lunch-end'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      const cur = sel.value;
+      sel.innerHTML = slots.map(s=>`<option value="${s}"${s===cur?' selected':''}>${s}</option>`).join('');
+    });
+  };
+
+  /* ── MODAL CLOSE ON OVERLAY CLICK ─────────────────────────── */
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) {
+        const id = overlay.id.replace('modal-','');
+        if (window.closeModal) window.closeModal(id);
+      }
+    });
+  });
+
+})();
+</script>
+
+</body>
+</html>
