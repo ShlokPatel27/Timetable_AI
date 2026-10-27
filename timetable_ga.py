@@ -35,6 +35,9 @@ import copy
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Any
 
+import nlp_engine
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # DATA MODELS
 # ──────────────────────────────────────────────────────────────────────────────
@@ -113,6 +116,8 @@ class TimetableGA:
         num_generations: int = 500,
         tournament_k: int = 3,
         elitism_count: int = 2,
+        nlp_constraints: Optional[List[Dict[str, Any]]] = None,
+        seed_chromosome: Optional[List[Tuple[int, int, int]]] = None,
     ):
         self.theory_courses = theory_courses
         self.lab_courses = lab_courses
@@ -124,6 +129,8 @@ class TimetableGA:
         self.lunch_window_slots = lunch_window_slots
         self.prefer_theory_time = prefer_theory_time
         self.prefer_lab_time = prefer_lab_time
+        self.nlp_constraints = nlp_constraints or []
+        self.seed_chromosome = seed_chromosome
 
         self.pop_size = int(pop_size)
         self.mutation_rate = float(mutation_rate)
@@ -210,7 +217,15 @@ class TimetableGA:
         return [self._random_gene(s) for s in self.sessions]
 
     def _initialize_population(self) -> List[List[Tuple[int, int, int]]]:
-        return [self._repair(self._create_random_chromosome()) for _ in range(self.pop_size)]
+        pop = []
+        if self.seed_chromosome and len(self.seed_chromosome) == self.num_sessions:
+            pop.append(self._repair(list(self.seed_chromosome)))
+            for _ in range(max(1, self.pop_size // 3)):
+                mutated = self._mutate(self.seed_chromosome)
+                pop.append(self._repair(mutated))
+        while len(pop) < self.pop_size:
+            pop.append(self._repair(self._create_random_chromosome()))
+        return pop
 
     # ── Repair function ──────────────────────────────────────────────────────
 
@@ -256,8 +271,8 @@ class TimetableGA:
                     break
 
             if conflict:
-                # Re-assign randomly up to 10 tries
-                for _ in range(10):
+                # Re-assign randomly up to 15 tries
+                for _ in range(15):
                     new_day = random.randint(0, self.num_days - 1)
                     if sess.session_type == "lab":
                         new_slot = random.randint(0, max(0, self.num_slots - 2))
@@ -281,6 +296,90 @@ class TimetableGA:
                 for k in slots_used:
                     used[k] = i
 
+        # 5. Resolve division-level theory slot conflicts (strictly 1 theory session per day+slot)
+        theory_occupied_slots: Dict[Tuple[int, int], int] = {}
+        for i, (day, slot, room) in enumerate(ch):
+            sess = self.sessions[i]
+            if sess.session_type != "theory":
+                continue
+            ds_key = (day, slot)
+            if ds_key in theory_occupied_slots:
+                # Conflict: find a slot with no other theory session
+                all_combos = [(d, s) for d in range(self.num_days) for s in range(self.num_slots)]
+                random.shuffle(all_combos)
+                moved = False
+                for new_d, new_s in all_combos:
+                    new_ds = (new_d, new_s)
+                    if new_ds not in theory_occupied_slots:
+                        # Find an available theory room for this day+slot
+                        avail_rooms = [
+                            r for r in range(max(1, self._lab_room_start_idx))
+                            if (new_d, new_s, r) not in used
+                        ]
+                        if avail_rooms:
+                            new_r = random.choice(avail_rooms)
+                            # Remove old used key
+                            used.pop((day, slot, room), None)
+                            used[(new_d, new_s, new_r)] = i
+                            ch[i] = (new_d, new_s, new_r)
+                            theory_occupied_slots[new_ds] = i
+                            moved = True
+                            break
+                if not moved:
+                    theory_occupied_slots[ds_key] = i
+            else:
+                theory_occupied_slots[ds_key] = i
+
+        # 6. Resolve student batch overlaps (no batch can have 2 sessions in the same slot)
+        batch_slots: Dict[str, Dict[Tuple[int, int], int]] = {b: {} for b in self.batches}
+        for i, (day, slot, room) in enumerate(ch):
+            sess = self.sessions[i]
+            assigned = self.batches if sess.session_type == "theory" else ([sess.batch] if sess.batch else self.batches)
+            has_conflict = False
+            for b in assigned:
+                for s in range(slot, slot + sess.duration):
+                    if (day, s) in batch_slots.get(b, {}):
+                        has_conflict = True
+                        break
+                if has_conflict:
+                    break
+
+            if has_conflict:
+                max_s = self.num_slots - (1 if sess.session_type == "lab" else 0)
+                all_combos = [(d, s) for d in range(self.num_days) for s in range(max_s)]
+                random.shuffle(all_combos)
+                for new_d, new_s in all_combos:
+                    dur_slots = list(range(new_s, new_s + sess.duration))
+                    # Check batch availability
+                    if any((new_d, s) in batch_slots.get(b, {}) for b in assigned for s in dur_slots):
+                        continue
+                    # Check room availability
+                    if sess.session_type == "lab":
+                        target_room = sess.dedicated_room_idx if sess.dedicated_room_idx is not None else self._lab_room_start_idx
+                        if all((new_d, s, target_room) not in used for s in dur_slots):
+                            for s in range(slot, slot + sess.duration):
+                                used.pop((day, s, room), None)
+                            for s in dur_slots:
+                                used[(new_d, s, target_room)] = i
+                            ch[i] = (new_d, new_s, target_room)
+                            day, slot, room = new_d, new_s, target_room
+                            break
+                    else:
+                        avail = [r for r in range(max(1, self._lab_room_start_idx)) if (new_d, new_s, r) not in used]
+                        if avail:
+                            target_room = random.choice(avail)
+                            used.pop((day, slot, room), None)
+                            used[(new_d, new_s, target_room)] = i
+                            ch[i] = (new_d, new_s, target_room)
+                            day, slot, room = new_d, new_s, target_room
+                            break
+
+            for b in assigned:
+                if b not in batch_slots:
+                    batch_slots[b] = {}
+                for s in range(slot, slot + sess.duration):
+                    batch_slots[b][(day, s)] = i
+
         return ch
 
     # ── Fitness function ─────────────────────────────────────────────────────
@@ -298,6 +397,10 @@ class TimetableGA:
         day_used_slots: Dict[int, set] = {}
         # for gap analysis: (batch_or_div, day) → sorted list of slots
         entity_day_slots: Dict[Tuple[str, int], List[int]] = {}
+        # Division-level slot: only one theory session per (day, slot) regardless of room
+        division_slot: Dict[Tuple[int, int], int] = {}  # (day, slot) → sess_idx
+        # Batch-level slot: no student batch can have 2 sessions at the same (day, slot)
+        batch_day_slots: Dict[str, Dict[Tuple[int, int], int]] = {b: {} for b in self.batches}
 
         for i, (day, slot, room) in enumerate(chromosome):
             sess = self.sessions[i]
@@ -344,6 +447,26 @@ class TimetableGA:
             course_day[cd_key] = course_day.get(cd_key, 0) + 1
             if course_day[cd_key] > 1:
                 hard_penalty += 4.0
+
+            # ── Division-level theory slot conflict ──────────────────────
+            if sess.session_type == "theory":
+                ds_key = (day, slot)
+                if ds_key in division_slot:
+                    hard_penalty += 5.0  # two theory classes at same time = impossible for students
+                else:
+                    division_slot[ds_key] = i
+
+            # ── Student batch conflict (theory occupies all batches; lab occupies assigned batch) ──
+            assigned_batches = self.batches if sess.session_type == "theory" else ([sess.batch] if sess.batch else self.batches)
+            for b in assigned_batches:
+                if b not in batch_day_slots:
+                    batch_day_slots[b] = {}
+                for s in range(slot, slot + sess.duration):
+                    b_key = (day, s)
+                    if b_key in batch_day_slots[b]:
+                        hard_penalty += 6.0  # students cannot be in two classes at once
+                    else:
+                        batch_day_slots[b][b_key] = i
 
             # ── Track day slot usage (for lunch window) ──────────────────────
             if day not in day_used_slots:
@@ -402,11 +525,87 @@ class TimetableGA:
             elif sess.session_type == "lab" and slot in self._lab_pref_slots:
                 soft_score += 1.5
 
+        # ── SOFT: Natural Language Constraints (NLP Engine) ───────────────────
+        if self.nlp_constraints:
+            morning_slots = set(range(0, max(1, self.num_slots // 2)))
+            afternoon_slots = set(range(max(1, self.num_slots // 2), self.num_slots))
+
+            for c in self.nlp_constraints:
+                intent = c.get("intent", "")
+                polarity = c.get("polarity", "POSITIVE")
+                c_faculty = c.get("faculty")
+                c_course = c.get("course")
+                c_room = c.get("room")
+                c_batch = c.get("batch")
+                c_days = set(c.get("days", []))
+                c_period = c.get("period")
+                c_slot = c.get("specific_slot")
+
+                # Track if at least one session satisfies target placement for MOVE_SESSION
+                target_placed = False
+
+                for i, (day, slot, room_idx) in enumerate(chromosome):
+                    sess = self.sessions[i]
+                    day_name = self.days[day] if day < len(self.days) else ""
+                    room_name = self._all_rooms_meta[room_idx]["name"] if room_idx < len(self._all_rooms_meta) else ""
+
+                    fac_match = (not c_faculty) or (c_faculty.lower() in sess.faculty.lower())
+                    crs_match = (not c_course) or (c_course.lower() in sess.course_name.lower())
+                    bch_match = (not c_batch) or (sess.batch and c_batch.lower() in sess.batch.lower())
+
+                    # Targeted move / specific placement
+                    if crs_match and (c_faculty is None or fac_match) and (c_course or c_faculty):
+                        match_day = (not c_days) or (day_name in c_days)
+                        match_slot = (
+                            (c_period == "morning" and slot in morning_slots) or
+                            (c_period == "afternoon" and slot in afternoon_slots) or
+                            (c_slot and slot < len(self.time_slots) and (self.time_slots[slot] == c_slot or c_slot in self.time_slots[slot])) or
+                            (not c_period and not c_slot)
+                        )
+                        match_room = (not c_room) or (c_room.lower() in room_name.lower())
+
+                        if match_day and match_slot and match_room:
+                            if polarity == "POSITIVE":
+                                target_placed = True
+                                soft_score += 35.0
+                            else:
+                                soft_score -= 40.0
+                        elif not match_slot and polarity == "POSITIVE" and len(c_days) >= 3:
+                            soft_score -= 3.0
+
+                    # 3. Room Allocation
+                    if c_room and (c_course and c_course.lower() in sess.course_name.lower()):
+                        if c_room.lower() in room_name.lower():
+                            soft_score += 15.0
+                        else:
+                            soft_score -= 5.0
+
+                    # 4. Batch Preference
+                    if c_batch and (sess.batch and c_batch.lower() in sess.batch.lower()):
+                        match_day = (not c_days) or (day_name in c_days)
+                        match_period = (
+                            (c_period == "morning" and slot in morning_slots) or
+                            (c_period == "afternoon" and slot in afternoon_slots)
+                        )
+                        if match_day and match_period:
+                            soft_score += (10.0 if polarity == "POSITIVE" else -20.0)
+
+                    # 5. Free Slot
+                    if intent == "FREE_SLOT_CONSTRAINT" or (polarity == "NEGATIVE" and not c_course and not c_faculty):
+                        if c_days and day_name in c_days:
+                            if c_period == "afternoon" and slot in afternoon_slots:
+                                soft_score -= 15.0
+                            elif c_slot and slot < len(self.time_slots) and self.time_slots[slot] == c_slot:
+                                soft_score -= 25.0
+
+                if intent == "MOVE_SESSION" and polarity == "POSITIVE" and not target_placed:
+                    soft_score -= 30.0
+
         # ── Combined fitness ──────────────────────────────────────────────────
         if hard_penalty == 0:
             return soft_score
         else:
-            return -hard_penalty * 100.0 + soft_score * 0.01
+            return -hard_penalty * 200.0 + soft_score * 0.01
 
     # ── GA operators ─────────────────────────────────────────────────────────
 
@@ -460,9 +659,10 @@ class TimetableGA:
             if hard_penalty := self._count_hard_violations(best_overall):
                 pass  # still has violations
             else:
-                print(f"\n[OK] Conflict-free schedule found at generation {gen}!")
-                print(f"[INFO] Soft score: {best_overall_fit:.4f}")
-                break
+                if not self.nlp_constraints or gen >= min(75, self.num_generations):
+                    print(f"\n[OK] Conflict-free schedule found at generation {gen}!")
+                    print(f"[INFO] Soft score: {best_overall_fit:.4f}")
+                    break
 
             # Elitism
             sorted_pop = sorted(zip(population, fitnesses), key=lambda x: x[1], reverse=True)
@@ -488,6 +688,8 @@ class TimetableGA:
         faculty_day_slots: Dict[str, Dict[int, List[int]]] = {}
         room_time: Dict[Tuple[int, int, int], int] = {}
         course_day: Dict[Tuple[str, Optional[str], int], int] = {}
+        division_slot: Dict[Tuple[int, int], int] = {}
+        batch_day_slots: Dict[str, Dict[Tuple[int, int], int]] = {b: {} for b in self.batches}
 
         for i, (day, slot, room) in enumerate(chromosome):
             sess = self.sessions[i]
@@ -527,7 +729,154 @@ class TimetableGA:
             if course_day[cd_key] > 1:
                 violations += 1
 
+            # Division-level theory slot conflict
+            if sess.session_type == "theory":
+                ds_key = (day, slot)
+                if ds_key in division_slot:
+                    violations += 1
+                else:
+                    division_slot[ds_key] = i
+
+            # Student batch conflict
+            assigned_batches = self.batches if sess.session_type == "theory" else ([sess.batch] if sess.batch else self.batches)
+            for b in assigned_batches:
+                if b not in batch_day_slots:
+                    batch_day_slots[b] = {}
+                for s in range(slot, slot + sess.duration):
+                    b_key = (day, s)
+                    if b_key in batch_day_slots[b]:
+                        violations += 1
+                    else:
+                        batch_day_slots[b][b_key] = i
+
         return violations
+
+    def evaluate_nlp_satisfaction(self, chromosome) -> Dict[str, Any]:
+        """
+        Evaluates how well the chromosome satisfied each natural language soft constraint.
+        Returns a detailed evaluation report and an overall satisfaction rate (0-100%).
+        """
+        if not self.nlp_constraints or not chromosome:
+            return {"satisfaction_rate": 100, "evaluations": []}
+
+        morning_slots = set(range(0, max(1, self.num_slots // 2)))
+        afternoon_slots = set(range(max(1, self.num_slots // 2), self.num_slots))
+        evaluations = []
+        satisfied_count = 0
+
+        for c in self.nlp_constraints:
+            raw_text = c.get("raw_text", "")
+            intent = c.get("intent", "")
+            polarity = c.get("polarity", "POSITIVE")
+            c_faculty = c.get("faculty")
+            c_course = c.get("course")
+            c_room = c.get("room")
+            c_batch = c.get("batch")
+            c_days = set(c.get("days", []))
+            c_period = c.get("period")
+            c_slot = c.get("specific_slot")
+
+            matched_sessions = []
+            satisfied = True
+            reason = "Constraint conditions satisfied."
+
+            for i, (day, slot, room_idx) in enumerate(chromosome):
+                sess = self.sessions[i]
+                day_name = self.days[day] if day < len(self.days) else ""
+                room_name = self._all_rooms_meta[room_idx]["name"] if room_idx < len(self._all_rooms_meta) else ""
+
+                fac_match = (not c_faculty) or (c_faculty.lower() in sess.faculty.lower())
+                crs_match = (not c_course) or (c_course.lower() in sess.course_name.lower())
+                bch_match = (not c_batch) or (sess.batch and c_batch.lower() in sess.batch.lower())
+
+                if fac_match and crs_match and bch_match:
+                    matched_sessions.append((sess, day_name, slot, room_name))
+
+            if matched_sessions:
+                is_specific_target = (
+                    (intent == "MOVE_SESSION") or
+                    ("move" in raw_text.lower()) or
+                    ("shift" in raw_text.lower()) or
+                    ("change" in raw_text.lower()) or
+                    (c_days and len(c_days) < len(matched_sessions))
+                )
+
+                if is_specific_target and polarity == "POSITIVE":
+                    found_target = False
+                    for sess, day_name, slot, room_name in matched_sessions:
+                        in_morning = slot in morning_slots
+                        in_afternoon = slot in afternoon_slots
+                        in_days = (not c_days) or (day_name in c_days)
+                        in_slot = (not c_slot) or (slot < len(self.time_slots) and (self.time_slots[slot] == c_slot or c_slot in self.time_slots[slot]))
+                        in_period = (not c_period) or (c_period == "morning" and in_morning) or (c_period == "afternoon" and in_afternoon)
+                        in_room = (not c_room) or (c_room.lower() in room_name.lower())
+
+                        if in_days and in_slot and in_period and in_room:
+                            found_target = True
+                            break
+                    if found_target:
+                        satisfied = True
+                        reason = "Successfully scheduled session at target day/slot."
+                    else:
+                        satisfied = False
+                        reason = "Target session could not be placed without creating hard constraint conflict."
+                else:
+                    for sess, day_name, slot, room_name in matched_sessions:
+                        in_morning = slot in morning_slots
+                        in_afternoon = slot in afternoon_slots
+                        in_days = (not c_days) or (day_name in c_days)
+                        in_slot = (not c_slot) or (slot < len(self.time_slots) and (self.time_slots[slot] == c_slot or c_slot in self.time_slots[slot]))
+
+                        if polarity == "POSITIVE":
+                            if c_days and not in_days:
+                                satisfied = False
+                                reason = f"Scheduled on {day_name} instead of requested {', '.join(c_days)}."
+                            if c_period == "morning" and not in_morning:
+                                satisfied = False
+                                reason = f"Scheduled in afternoon ({self.time_slots[slot] if slot < len(self.time_slots) else slot})."
+                            elif c_period == "afternoon" and not in_afternoon:
+                                satisfied = False
+                                reason = f"Scheduled in morning ({self.time_slots[slot] if slot < len(self.time_slots) else slot})."
+                            if c_room and c_room.lower() not in room_name.lower():
+                                satisfied = False
+                                reason = f"Assigned to {room_name} instead of {c_room}."
+                        else:  # NEGATIVE (Avoid)
+                            if (not c_days or in_days) and ((c_period == "morning" and in_morning) or (c_period == "afternoon" and in_afternoon) or in_slot):
+                                satisfied = False
+                                reason = f"Found conflicting session scheduled at {day_name} {self.time_slots[slot] if slot < len(self.time_slots) else slot}."
+            else:
+                # If target entity not found in chromosome
+                if intent == "FREE_SLOT_CONSTRAINT":
+                    # Check if requested free slot has sessions
+                    occupied_count = 0
+                    for i, (day, slot, _) in enumerate(chromosome):
+                        d_name = self.days[day] if day < len(self.days) else ""
+                        if c_days and d_name in c_days:
+                            if (c_period == "afternoon" and slot in afternoon_slots) or (c_slot and slot < len(self.time_slots) and self.time_slots[slot] == c_slot):
+                                occupied_count += 1
+                    if occupied_count > 0:
+                        satisfied = False
+                        reason = f"Slot has {occupied_count} sessions scheduled."
+
+            if satisfied:
+                satisfied_count += 1
+                status = "Satisfied"
+            else:
+                status = "Violated"
+
+            evaluations.append({
+                "text": raw_text,
+                "intent": intent,
+                "polarity": polarity,
+                "status": status,
+                "details": reason
+            })
+
+        rate = round((satisfied_count / max(1, len(self.nlp_constraints))) * 100)
+        return {
+            "satisfaction_rate": rate,
+            "evaluations": evaluations
+        }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -600,6 +949,23 @@ def run_ga_api(config_dict=None):
     prefer_theory = config_dict.get("prefer_theory_time", "unbiased")
     prefer_lab    = config_dict.get("prefer_lab_time", "unbiased")
 
+    # ── Parse NLP Constraints (if provided in plain English) ────────────────
+    nlp_text = config_dict.get("nlp_constraints_text", "").strip()
+    nlp_constraints = config_dict.get("nlp_constraints", [])
+    if nlp_text and not nlp_constraints:
+        all_crs_names = [tc.name for tc in theory_courses] + [lc.name for lc in lab_courses]
+        all_fac_names = [tc.faculty for tc in theory_courses] + [lc.faculty for lc in lab_courses]
+        all_rm_names = [tr.name for tr in theory_rooms] + [lr.name for lr in lab_rooms]
+        nlp_constraints = nlp_engine.parse_natural_language_constraints(
+            nlp_text,
+            courses=all_crs_names,
+            faculties=all_fac_names,
+            rooms=all_rm_names,
+            batches=batches,
+            days=days_raw,
+            time_slots=slots_raw,
+        )
+
     # ── GA parameters ───────────────────────────────────────────────────────
     ga = TimetableGA(
         theory_courses=theory_courses,
@@ -618,6 +984,7 @@ def run_ga_api(config_dict=None):
         num_generations=int(config_dict.get("max_generations", 500)),
         tournament_k=int(config_dict.get("tournament_k", 3)),
         elitism_count=int(config_dict.get("elitism_count", 2)),
+        nlp_constraints=nlp_constraints,
     )
 
     # ── Run ──────────────────────────────────────────────────────────────────
@@ -719,6 +1086,7 @@ def run_ga_api(config_dict=None):
 
     # ── Violation detail ──────────────────────────────────────────────────────
     violation_detail = _build_violation_detail(ga, best_chromosome, days_raw, slots_raw)
+    nlp_eval = ga.evaluate_nlp_satisfaction(best_chromosome)
 
     return {
         "schedule":          schedule,
@@ -739,6 +1107,7 @@ def run_ga_api(config_dict=None):
         "total_sessions":    ga.num_sessions,
         "theory_sessions":   sum(1 for s in ga.sessions if s.session_type == "theory"),
         "lab_sessions":      sum(1 for s in ga.sessions if s.session_type == "lab"),
+        "nlp_results":       nlp_eval,
         "config": {
             "population_size":   ga.pop_size,
             "mutation_rate":     ga.mutation_rate,
@@ -763,6 +1132,8 @@ def _build_violation_detail(ga: TimetableGA, chromosome, days_raw, slots_raw) ->
     faculty_day_slots: Dict[str, Dict[int, List[int]]] = {}
     room_time: Dict[Tuple[int, int, int], int] = {}
     course_day: Dict[Tuple[str, Optional[str], int], int] = {}
+    division_slot: Dict[Tuple[int, int], int] = {}
+    batch_day_slots: Dict[str, Dict[Tuple[int, int], int]] = {b: {} for b in ga.batches}
 
     for i, (day, slot, room) in enumerate(chromosome):
         sess = ga.sessions[i]
@@ -805,7 +1176,408 @@ def _build_violation_detail(ga: TimetableGA, chromosome, days_raw, slots_raw) ->
             entity = sess.batch if sess.batch else "Whole Division"
             msgs.append(f"Repeat: '{sess.course_name}' for '{entity}' appears more than once on {day_label}.")
 
+        # Division slot conflict
+        if sess.session_type == "theory":
+            ds_key = (day, slot)
+            if ds_key in division_slot:
+                other_sess = ga.sessions[division_slot[ds_key]]
+                msgs.append(f"Division slot conflict: '{sess.course_name}' and '{other_sess.course_name}' both scheduled on {day_label} @ {slot_label}.")
+            else:
+                division_slot[ds_key] = i
+
+        # Student batch conflict
+        assigned_batches = ga.batches if sess.session_type == "theory" else ([sess.batch] if sess.batch else ga.batches)
+        for b in assigned_batches:
+            if b not in batch_day_slots:
+                batch_day_slots[b] = {}
+            for s in range(slot, slot + sess.duration):
+                b_key = (day, s)
+                if b_key in batch_day_slots[b]:
+                    other_sess = ga.sessions[batch_day_slots[b][b_key]]
+                    msgs.append(f"Student conflict: {b} is scheduled for both '{sess.course_name}' and '{other_sess.course_name}' on {day_label} @ {slots_raw[s] if s < len(slots_raw) else s}.")
+                else:
+                    batch_day_slots[b][b_key] = i
+
     return msgs[:30]  # cap at 30 messages
+
+
+def run_ga_edit(csv_text: str, edit_instruction: str, config_dict=None) -> Dict[str, Any]:
+    """
+    Direct Targeted Timetable Edit Engine:
+    1. Parses uploaded timetable CSV without corrupting or duplicating sessions.
+    2. Understands the admin's change instruction in plain English.
+    3. Validates the requested change against hard constraints:
+       - If the edit causes a conflict: preserves the schedule 100% unchanged,
+         notifies the admin of the exact conflict, and provides actionable suggestions.
+       - If valid: moves ONLY the requested session while keeping all other sessions intact.
+    """
+    import re
+    if config_dict is None:
+        config_dict = {}
+
+    parsed_csv = nlp_engine.parse_timetable_csv(csv_text)
+    days_raw = parsed_csv["days"]
+    slots_raw = parsed_csv["time_slots"]
+    uploaded_schedule = parsed_csv["schedule"]
+
+    if not uploaded_schedule:
+        raise ValueError("No valid schedule sessions found in uploaded CSV.")
+
+    # Reconstruct room lists
+    theory_rooms_set = set()
+    lab_rooms_set = set()
+    for s in uploaded_schedule:
+        if s["type"] == "lab":
+            lab_rooms_set.add(s["room"])
+        else:
+            theory_rooms_set.add(s["room"])
+    if not theory_rooms_set:
+        theory_rooms_set.add("Classroom 101")
+
+    theory_rooms_list = sorted(list(theory_rooms_set))
+    lab_rooms_list = sorted(list(lab_rooms_set))
+    all_rooms_list = theory_rooms_list + lab_rooms_list
+    all_batches_list = parsed_csv["batches"] or ["Batch A", "Batch B", "Batch C"]
+    all_crs = sorted(list(set(s["course"] for s in uploaded_schedule)))
+    all_fac = sorted(list(set(s["faculty"] for s in uploaded_schedule if s["faculty"])))
+
+    # Parse NLP edit instruction
+    nlp_constraints = nlp_engine.parse_natural_language_constraints(
+        edit_instruction,
+        courses=all_crs,
+        faculties=all_fac,
+        rooms=all_rooms_list,
+        batches=all_batches_list,
+        days=days_raw,
+        time_slots=slots_raw
+    )
+
+    # Slot & Day helper matchers
+    def match_slot(text_or_alias: str) -> Optional[str]:
+        if not text_or_alias:
+            return None
+        t = text_or_alias.strip().lower()
+        # 1. Substring match for full slot string
+        for s in slots_raw:
+            if s.lower() in t or s.replace("–", "-").lower() in t:
+                return s
+        # 2. Match HH:MM - HH:MM
+        m_full = re.search(r'\b(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})\b', t)
+        if m_full:
+            h1 = int(m_full.group(1))
+            h2 = int(m_full.group(3))
+            cand = f"{h1:02d}:00 - {h2:02d}:00"
+            for s in slots_raw:
+                if cand == s or cand.replace(" - ", "-") in s:
+                    return s
+        # 3. Match N-N (without colons, e.g. 8-9, 3-4, 12-1)
+        m = re.search(r'(?<!:)\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b(?!:)', t)
+        if m:
+            h1 = int(m.group(1))
+            h2 = int(m.group(2))
+            start_h = h1 if h1 >= 7 else h1 + 12
+            end_h = h2 if h2 >= 7 else h2 + 12
+            cand = f"{start_h:02d}:00 - {end_h:02d}:00"
+            for s in slots_raw:
+                if cand == s or f"{h1}-{h2}" == s:
+                    return s
+            return cand
+        # 4. Match N am / N pm
+        m_hour = re.search(r'\b(\d{1,2})\s*(am|pm)\b', t)
+        if m_hour:
+            h = int(m_hour.group(1))
+            is_pm = m_hour.group(2) == 'pm'
+            start_h = h if not is_pm else (h if h == 12 else h + 12)
+            end_h = start_h + 1
+            cand = f"{start_h:02d}:00 - {end_h:02d}:00"
+            for s in slots_raw:
+                if cand == s:
+                    return s
+        return None
+
+    def match_day(text_or_alias: str) -> Optional[str]:
+        if not text_or_alias:
+            return None
+        lower = text_or_alias.strip().lower()
+        days_map = {
+            "monday": "Monday", "mon": "Mon",
+            "tuesday": "Tuesday", "tue": "Tue",
+            "wednesday": "Wednesday", "wed": "Wed",
+            "thursday": "Thursday", "thu": "Thu",
+            "friday": "Friday", "fri": "Fri",
+            "saturday": "Saturday", "sat": "Sat",
+            "sunday": "Sunday", "sun": "Sun",
+        }
+        for alias, std in days_map.items():
+            if re.search(r'\b' + alias + r'\b', lower):
+                for kd in days_raw:
+                    if kd.lower() == alias or kd.lower() == std.lower() or kd.lower() == alias[:3]:
+                        return kd
+                return std
+        return None
+
+    # Check for "from <src> to <dst>"
+    m_from_to = re.search(r'from\s+(.+?)\s+to\s+(.+)$', edit_instruction.lower())
+    src_text = m_from_to.group(1) if m_from_to else ""
+    dst_text = m_from_to.group(2) if m_from_to else edit_instruction.lower()
+
+    c_info = nlp_constraints[0] if nlp_constraints else {}
+    target_course = c_info.get("course")
+    target_faculty = c_info.get("faculty")
+    target_batch = c_info.get("batch")
+
+    if not target_course:
+        for c in all_crs:
+            if c.lower() in edit_instruction.lower():
+                target_course = c
+                break
+
+    source_day = match_day(src_text)
+    source_slot = match_slot(src_text)
+
+    dest_day = match_day(dst_text) or (c_info.get("days", [None])[0] if c_info.get("days") else None)
+    dest_slot = match_slot(dst_text) or match_slot(c_info.get("specific_slot", ""))
+    dest_period = c_info.get("period")
+    if not dest_period:
+        if "morning" in dst_text: dest_period = "morning"
+        elif "afternoon" in dst_text: dest_period = "afternoon"
+    dest_room = c_info.get("room")
+
+    # Locate the target session in uploaded_schedule
+    target_idx = None
+    # 1. By course and source day/slot
+    if target_course:
+        for idx, s in enumerate(uploaded_schedule):
+            if target_course.lower() in s["course"].lower():
+                if source_day and s["day"].lower() != source_day.lower():
+                    continue
+                if source_slot and s["slot"] != source_slot:
+                    continue
+                target_idx = idx
+                break
+
+    # 2. By course (first session not already at destination)
+    if target_idx is None and target_course:
+        for idx, s in enumerate(uploaded_schedule):
+            if target_course.lower() in s["course"].lower():
+                if dest_day and s["day"].lower() == dest_day.lower() and dest_slot and s["slot"] == dest_slot:
+                    continue
+                target_idx = idx
+                break
+
+    # 3. By faculty
+    if target_idx is None and target_faculty:
+        for idx, s in enumerate(uploaded_schedule):
+            if target_faculty.lower() in s["faculty"].lower():
+                target_idx = idx
+                break
+
+    # Helper: validate move of session to (cand_d, cand_s, cand_r) against other sessions
+    def validate_move(sess_item, cand_d, cand_s, cand_r, other_sessions):
+        conflicts = []
+        is_theory = (sess_item["type"] == "theory")
+        duration = sess_item.get("duration", 2 if not is_theory else 1)
+        sess_batches = all_batches_list if is_theory else ([sess_item["batch"]] if sess_item.get("batch") else all_batches_list)
+
+        s_idx = slots_raw.index(cand_s) if cand_s in slots_raw else -1
+        if s_idx < 0:
+            return ["Invalid time slot specified."]
+        if s_idx + duration > len(slots_raw):
+            return ["Session duration exceeds daily time boundary."]
+
+        cand_slots = slots_raw[s_idx:s_idx + duration]
+
+        # Check course repeat limit (max 1 session per course per day)
+        if cand_d != sess_item["day"]:
+            for o in other_sessions:
+                if o["course"].lower() == sess_item["course"].lower() and o["day"] == cand_d:
+                    conflicts.append(f"Course repeat limit: '{sess_item['course']}' is already scheduled on {cand_d}. A course cannot appear more than once per day.")
+                    break
+
+        for o in other_sessions:
+            o_dur = o.get("duration", 2 if o["type"] == "lab" else 1)
+            o_sidx = slots_raw.index(o["slot"]) if o["slot"] in slots_raw else -1
+            if o_sidx < 0 or o["day"] != cand_d:
+                continue
+            o_slots = slots_raw[o_sidx:o_sidx + o_dur]
+
+            # Overlapping slots between cand_slots and o_slots
+            overlap = any(sl in o_slots for sl in cand_slots)
+            if not overlap:
+                continue
+
+            # 1. Division conflict (Theory vs Theory)
+            if is_theory and o["type"] == "theory":
+                conflicts.append(f"Division slot conflict: Theory lecture '{o['course']}' is already scheduled on {cand_d} @ {o['slot']}.")
+
+            # 2. Student batch conflict
+            o_batches = all_batches_list if o["type"] == "theory" else ([o["batch"]] if o.get("batch") else all_batches_list)
+            for b in sess_batches:
+                if b in o_batches:
+                    conflicts.append(f"Student conflict: {b} is already attending '{o['course']}' on {cand_d} @ {o['slot']}.")
+                    break
+
+            # 3. Faculty conflict
+            if sess_item.get("faculty") and o.get("faculty") and sess_item["faculty"].lower() == o["faculty"].lower():
+                conflicts.append(f"Faculty conflict: {sess_item['faculty']} is already teaching '{o['course']}' on {cand_d} @ {o['slot']}.")
+
+            # 4. Room conflict
+            if cand_r and o.get("room") and cand_r.lower() == o["room"].lower():
+                conflicts.append(f"Room conflict: Room '{cand_r}' is already occupied by '{o['course']}' on {cand_d} @ {o['slot']}.")
+
+        return conflicts
+
+    # If target session found
+    schedule = copy.deepcopy(uploaded_schedule)
+    conflict_detected = False
+    conflict_messages = []
+    suggestions = []
+
+    if target_idx is not None:
+        target_sess = schedule[target_idx]
+        other_sess_list = [s for idx, s in enumerate(schedule) if idx != target_idx]
+
+        final_day = dest_day or target_sess["day"]
+        final_slot = dest_slot
+
+        # If slot was not explicitly specified, find first candidate in period
+        if not final_slot and dest_period:
+            mid = len(slots_raw) // 2
+            cand_range = slots_raw[:mid] if dest_period == "morning" else slots_raw[mid:]
+            for cs in cand_range:
+                test_r = dest_room or target_sess["room"]
+                test_errs = validate_move(target_sess, final_day, cs, test_r, other_sess_list)
+                if not test_errs:
+                    final_slot = cs
+                    break
+
+        if not final_slot:
+            final_slot = target_sess["slot"]
+
+        # Choose room
+        final_room = dest_room
+        if not final_room:
+            # Pick a free room of correct type
+            allowed_rooms = theory_rooms_list if target_sess["type"] == "theory" else lab_rooms_list
+            occupied_rooms = set(
+                o["room"] for o in other_sess_list
+                if o["day"] == final_day and o["slot"] == final_slot
+            )
+            free_rooms = [r for r in allowed_rooms if r not in occupied_rooms]
+            final_room = free_rooms[0] if free_rooms else target_sess["room"]
+
+        # Validate the proposed edit
+        conflict_messages = validate_move(target_sess, final_day, final_slot, final_room, other_sess_list)
+
+        if conflict_messages:
+            conflict_detected = True
+            # Find suggestions where this session CAN be placed with 0 conflicts
+            for d in days_raw:
+                for sl in slots_raw:
+                    if d == target_sess["day"] and sl == target_sess["slot"]:
+                        continue
+                    test_cands = validate_move(target_sess, d, sl, final_room, other_sess_list)
+                    if not test_cands:
+                        suggestions.append(f"{d} {sl}")
+                        if len(suggestions) >= 4:
+                            break
+                if len(suggestions) >= 4:
+                    break
+        else:
+            # Apply targeted change: ONLY the target session moves!
+            target_sess["day"] = final_day
+            target_sess["slot"] = final_slot
+            target_sess["time_label"] = final_slot
+            target_sess["room"] = final_room
+            schedule[target_idx] = target_sess
+    else:
+        conflict_detected = True
+        conflict_messages = [f"Could not identify a session matching '{edit_instruction}' in the uploaded timetable."]
+
+    # Rebuild grids cleanly from schedule
+    grid_by_day = {d: {s: [] for s in slots_raw} for d in days_raw}
+    for entry in schedule:
+        d = entry["day"]
+        s = entry["slot"]
+        if d in grid_by_day and s in grid_by_day[d]:
+            grid_by_day[d][s].append(entry)
+
+    grid_by_room = {rm: {d: {s: [] for s in slots_raw} for d in days_raw} for rm in all_rooms_list}
+    for entry in schedule:
+        rm = entry["room"]
+        d = entry["day"]
+        s = entry["slot"]
+        if rm in grid_by_room and d in grid_by_room[rm] and s in grid_by_room[rm][d]:
+            grid_by_room[rm][d][s].append(entry)
+
+    all_entities = sorted(list(set(s.get("batch") or "Whole Division" for s in schedule) | set(["Whole Division"])))
+    grid_by_batch = {ent: {d: {s: [] for s in slots_raw} for d in days_raw} for ent in all_entities}
+    for entry in schedule:
+        d = entry["day"]
+        s = entry["slot"]
+        ent = entry.get("batch") or "Whole Division"
+        targets = all_entities if ent == "Whole Division" else [ent]
+        for t_ent in targets:
+            if t_ent in grid_by_batch and d in grid_by_batch[t_ent] and s in grid_by_batch[t_ent][d]:
+                grid_by_batch[t_ent][d][s].append(entry)
+
+    # Format NLP evaluations
+    eval_item = {
+        "text": edit_instruction,
+        "status": "Conflict Detected" if conflict_detected else "Satisfied",
+        "polarity": "NEGATIVE" if conflict_detected else "POSITIVE",
+        "details": (
+            f"Cannot apply requested change: {'; '.join(conflict_messages)}. The existing timetable was preserved to prevent schedule corruption."
+            if conflict_detected else
+            f"Successfully updated '{schedule[target_idx]['course']}' to {schedule[target_idx]['day']} @ {schedule[target_idx]['slot']} in {schedule[target_idx]['room']}. All other sessions preserved."
+        ),
+        "suggestions": suggestions
+    }
+
+    return {
+        "schedule":          schedule,
+        "grid_by_day":       grid_by_day,
+        "grid_by_room":      grid_by_room,
+        "grid_by_batch":     grid_by_batch,
+        "all_rooms":         all_rooms_list,
+        "theory_rooms":      theory_rooms_list,
+        "lab_rooms":         lab_rooms_list,
+        "all_batches":       all_entities,
+        "days":              days_raw,
+        "time_slots":        slots_raw,
+        "fitness":           100.0 if not conflict_detected else 0.0,
+        "violations":        len(conflict_messages) if conflict_detected else 0,
+        "violation_detail":  conflict_messages if conflict_detected else [],
+        "conflict_detected": conflict_detected,
+        "fitness_history":   [100.0],
+        "generations_run":   1,
+        "total_sessions":    len(schedule),
+        "theory_sessions":   sum(1 for s in schedule if s["type"] == "theory"),
+        "lab_sessions":      sum(1 for s in schedule if s["type"] == "lab"),
+        "nlp_results": {
+            "mode": "edit",
+            "instruction": edit_instruction,
+            "parsed_constraints": nlp_constraints,
+            "satisfaction_rate": 0 if conflict_detected else 100,
+            "status": "Conflict Detected - Schedule Preserved" if conflict_detected else "Satisfied",
+            "evaluations": [eval_item]
+        },
+        "config": {
+            "population_size":   100,
+            "mutation_rate":     0.05,
+            "crossover_rate":    0.8,
+            "max_generations":   100,
+            "elitism_count":     2,
+            "tournament_k":      3,
+            "num_theory_rooms":  len(theory_rooms_list),
+            "num_lab_rooms":     len(lab_rooms_list),
+            "num_days":          len(days_raw),
+            "num_slots":         len(slots_raw),
+            "prefer_theory_time": "unbiased",
+            "prefer_lab_time":    "unbiased",
+            "lunch_window":      [],
+        },
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────

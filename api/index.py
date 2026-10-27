@@ -5,20 +5,26 @@ from http.server import BaseHTTPRequestHandler
 
 # Add current directory to path so we can import modules in project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from timetable_ga import run_ga_api
+from timetable_ga import run_ga_api, run_ga_edit
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
-        config = json.loads(post_data.decode('utf-8'))
+        payload = json.loads(post_data.decode('utf-8'))
         
-        # Suppress any print() in GA logic that might fail in serverless env
         old_stdout = sys.stdout
         sys.stdout = open(os.devnull, "w")
         
         try:
-            result = run_ga_api(config)
+            if "/api/edit" in self.path:
+                result = run_ga_edit(
+                    payload.get("csv_content", ""),
+                    payload.get("edit_instruction", ""),
+                    payload.get("config", {})
+                )
+            else:
+                result = run_ga_api(payload)
             
             self.send_response(200)
             self.send_header('Content-type', 'application/json')

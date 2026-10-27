@@ -30,7 +30,16 @@ let labRoomsList = [
   { name: 'Computer Lab',     subject: 'CS Lab' },
 ];
 
-let timeSlots = ['8-9','9-10','10-11','11-12','12-1','1-2','2-3','3-4'];
+let timeSlots = [
+  '08:00 - 09:00',
+  '09:00 - 10:00',
+  '10:00 - 11:00',
+  '11:00 - 12:00',
+  '12:00 - 13:00',
+  '13:00 - 14:00',
+  '14:00 - 15:00',
+  '15:00 - 16:00'
+];
 let batchList  = ['Batch A','Batch B','Batch C'];
 
 let lastResult   = null;
@@ -368,6 +377,7 @@ function buildConfig() {
     mutation_rate:      parseFloat(document.getElementById('input-mutation-rate')?.value)  || 0.05,
     crossover_rate:     parseFloat(document.getElementById('input-crossover-rate')?.value) || 0.80,
     max_generations:    parseInt(document.getElementById('input-max-generations')?.value)  || 500,
+    nlp_constraints_text: document.getElementById('nlp-constraints-input')?.value.trim()   || '',
   };
 }
 
@@ -401,7 +411,7 @@ btnRun.addEventListener('click', async () => {
     }
     const data = await res.json();
     lastResult = data;
-    renderResults(data);
+    displayResultsUI(data);
   } catch (e) {
     alert('Error: ' + e.message);
   } finally {
@@ -409,6 +419,36 @@ btnRun.addEventListener('click', async () => {
     btnRun.textContent = 'Generate Timetable';
   }
 });
+
+// ── DISPLAY RESULTS & UNHIDE UI ───────────────────────────────────────────────
+function displayResultsUI(data) {
+  const idleState = document.getElementById('idle-state');
+  const skeleton  = document.getElementById('skeleton-container');
+  const results   = document.getElementById('results');
+
+  if (idleState) idleState.hidden = true;
+  if (skeleton)  skeleton.hidden = true;
+
+  // Render content
+  renderResults(data);
+
+  if (results) {
+    results.hidden = false;
+    // Animate every section so it is visible immediately (replaces opacity: 0)
+    results.querySelectorAll('.anim-section').forEach((s, i) => {
+      s.style.animationDelay = (i * 0.05) + 's';
+      s.classList.add('anim-enter');
+    });
+    // Smooth scroll down to results
+    setTimeout(() => {
+      results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  }
+
+  if (window.setAppState) {
+    window.setAppState('done');
+  }
+}
 
 // ── RENDER RESULTS ────────────────────────────────────────────────────────────
 function renderResults(data) {
@@ -436,6 +476,66 @@ function renderResults(data) {
   renderConfigGrid(data.config);
   setupViewTabs(data);
   renderDetailTable(data.schedule);
+
+  // NLP Soft Constraints & Edit Results
+  const nlpPanel = document.getElementById('nlp-results-panel');
+  const nlpList = document.getElementById('nlp-eval-list');
+  const nlpRate = document.getElementById('nlp-rate-badge');
+  const nlpMode = document.getElementById('nlp-mode-indicator');
+
+  if (nlpPanel && data.nlp_results && data.nlp_results.evaluations && data.nlp_results.evaluations.length > 0) {
+    nlpPanel.hidden = false;
+    const rate = data.nlp_results.satisfaction_rate ?? 100;
+    if (nlpRate) {
+      nlpRate.textContent = `${rate}% Satisfied`;
+      if (rate >= 80) {
+        nlpRate.style.background = 'var(--success-lt)';
+        nlpRate.style.color = 'var(--success)';
+        nlpRate.style.borderColor = '#a7f3d0';
+      } else {
+        nlpRate.style.background = 'var(--danger-lt)';
+        nlpRate.style.color = 'var(--danger)';
+        nlpRate.style.borderColor = '#fecaca';
+      }
+    }
+
+    if (nlpMode) {
+      nlpMode.textContent = data.nlp_results.mode === 'edit'
+        ? 'MODE: CSV EDIT & RE-EVOLVE'
+        : 'MODE: NATURAL LANGUAGE SOFT CONSTRAINTS';
+    }
+
+    if (nlpList) {
+      nlpList.innerHTML = data.nlp_results.evaluations.map(ev => {
+        const isSat = ev.status === 'Satisfied';
+        const badgeCls = isSat ? 'nlp-eval-status--satisfied' : 'nlp-eval-status--violated';
+        const icon = isSat ? '✓' : '✗';
+        const suggestionsHtml = ev.suggestions && ev.suggestions.length ? `
+          <div style="margin-top:8px;padding:8px 12px;background:rgba(61,90,241,0.06);border-radius:6px;border:1px dashed var(--primary);">
+            <div style="font-size:0.75rem;font-weight:700;color:var(--primary);margin-bottom:4px;">💡 Conflict-Free Available Slots (Suggestions):</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              ${ev.suggestions.map(s => `<span class="badge" style="background:#fff;border:1px solid var(--primary);color:var(--primary);font-size:0.72rem;padding:2px 8px;border-radius:4px;font-weight:600;">${escHtml(s)}</span>`).join('')}
+            </div>
+          </div>
+        ` : '';
+
+        return `
+          <div class="nlp-eval-card">
+            <div style="flex:1;">
+              <div style="font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span>${escHtml(ev.text)}</span>
+              </div>
+              <div style="font-size:0.76rem;color:var(--text-2);margin-top:4px;line-height:1.4;">${escHtml(ev.details || '')}</div>
+              ${suggestionsHtml}
+            </div>
+            <span class="nlp-eval-status ${badgeCls}">${icon} ${escHtml(ev.status)}</span>
+          </div>
+        `;
+      }).join('');
+    }
+  } else if (nlpPanel) {
+    nlpPanel.hidden = true;
+  }
 
   document.getElementById('results').hidden = false;
 }
@@ -677,6 +777,24 @@ function drawFallbackChart(ctx, canvas, history) {
   ctx.closePath(); ctx.fill();
 }
 
+// ── TIME FORMAT HELPER (Prevents Excel Date Conversion e.g. 8-9 -> 08-Sep) ──
+function formatSlotToTime(rawSlot) {
+  if (!rawSlot) return '';
+  const s = String(rawSlot).trim().replace(/[\u2013\u2014]/g, '-');
+  // Check if it matches '8-9', '9-10', '1-2', '2-3', etc.
+  const m = s.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+  if (m) {
+    let h1 = parseInt(m[1], 10);
+    let h2 = parseInt(m[2], 10);
+    // Convert 12-hr college notation (e.g. 1-2 => 13:00 - 14:00)
+    const start_h = h1 >= 7 ? h1 : h1 + 12;
+    const end_h   = h2 >= 7 ? h2 : h2 + 12;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(start_h)}:00 - ${pad(end_h)}:00`;
+  }
+  return s;
+}
+
 // ── BUILD TIMETABLE GRID (single section) ─────────────────────────────────────
 function buildGridForFilter(data, filterFn) {
   const schedule = data.schedule || [];
@@ -688,12 +806,14 @@ function buildGridForFilter(data, filterFn) {
   rows.push(['Time', ...days]);
 
   slots.forEach(slot => {
-    // Replace any en-dash/em-dash with standard hyphen to avoid Excel date/character encoding confusion
-    const cleanSlot = String(slot).replace(/[\u2013\u2014]/g, '-');
+    // Format slot as clean time (e.g. 08:00 - 09:00) so Excel treats it as text, NEVER a month
+    const cleanSlot = formatSlotToTime(slot);
     const row = [cleanSlot];
     days.forEach(day => {
       const matches = schedule.filter(e =>
-        filterFn(e) && e.day === day && (e.time_label||'').startsWith(slot)
+        filterFn(e) && e.day === day && (
+          (e.time_label||'').startsWith(slot) || (e.slot||'').startsWith(slot)
+        )
       );
       if (matches.length === 0) {
         row.push('—');
@@ -703,7 +823,7 @@ function buildGridForFilter(data, filterFn) {
           if (e.faculty) parts.push(e.faculty);
           if (e.room)    parts.push(e.room);
           if (e.type === 'lab' && e.time_label) {
-            parts.push(String(e.time_label).replace(/[\u2013\u2014]/g, '-'));
+            parts.push(formatSlotToTime(e.time_label));
           }
           return parts.join(' | ');
         });
@@ -718,7 +838,9 @@ function buildGridForFilter(data, filterFn) {
 
 // ── BUILD ALL SECTIONS (for multi-sheet export) ───────────────────────────────
 function buildTimetableSections(data) {
-  const batches = data.all_batches || batchList || [];
+  const rawBatches = data.all_batches || batchList || [];
+  // Exclude 'Whole Division' so it is not duplicated in sections
+  const batches = rawBatches.filter(b => String(b).trim().toLowerCase() !== 'whole division');
   const sections = [];
 
   // Section 1: Whole Division (Theory only)
@@ -771,6 +893,7 @@ function buildTimetableGridRows(data) {
 
 // ── CSV EXPORT ────────────────────────────────────────────────────────────────
 // Uses UTF-8 BOM (\uFEFF) so Excel opens the file without garbled special chars.
+// Quotes Time column so Excel reads time slots as text, never as date months.
 document.getElementById('btn-export')?.addEventListener('click', () => {
   if (!lastResult) return;
   const rows = buildTimetableGridRows(lastResult);
@@ -830,6 +953,7 @@ document.getElementById('btn-export-excel')?.addEventListener('click', () => {
     try {
       const sections = buildTimetableSections(lastResult);
       const wb = xlsxLib.utils.book_new();
+      const usedSheetNames = new Set();
 
       sections.forEach(sec => {
         const ws = xlsxLib.utils.aoa_to_sheet(sec.rows);
@@ -842,8 +966,17 @@ document.getElementById('btn-export-excel')?.addEventListener('click', () => {
         });
         ws['!cols'] = colWidths.map(w => ({ wch: Math.min(Math.max(w + 3, 10), 45) }));
 
-        const safeName = String(sec.title).replace(/[:\\\/\?\*\[\]]/g, '').slice(0, 31);
-        xlsxLib.utils.book_append_sheet(wb, ws, safeName);
+        // Ensure safe & unique sheet name (max 31 chars, no invalid chars)
+        let safeName = String(sec.title).replace(/[:\\\/\?\*\[\]]/g, '').trim().slice(0, 31) || 'Sheet';
+        let uniqueName = safeName;
+        let counter = 2;
+        while (usedSheetNames.has(uniqueName.toLowerCase())) {
+          uniqueName = safeName.slice(0, 27) + ' (' + counter + ')';
+          counter++;
+        }
+        usedSheetNames.add(uniqueName.toLowerCase());
+
+        xlsxLib.utils.book_append_sheet(wb, ws, uniqueName);
       });
 
       xlsxLib.writeFile(wb, 'timetable.xlsx');
@@ -851,6 +984,137 @@ document.getElementById('btn-export-excel')?.addEventListener('click', () => {
       alert('Failed to generate Excel file: ' + e.message);
     }
   });
+});
+
+// ── NLP HELPERS & TIMETABLE EDIT (CSV) ───────────────────────────────────────
+window.addNlpConstraint = function(text) {
+  const input = document.getElementById('nlp-constraints-input');
+  if (!input) return;
+  const current = input.value.trim();
+  if (current) {
+    input.value = current + '.\n' + text;
+  } else {
+    input.value = text;
+  }
+  input.focus();
+  if (window.showToast) showToast('NLP constraint added!', 'info');
+};
+
+window.applySampleEdit = function(text) {
+  const input = document.getElementById('input-edit-instruction');
+  if (!input) return;
+  input.value = text;
+  input.focus();
+};
+
+let uploadedCsvContent = "";
+
+const dropZone = document.getElementById('drop-zone-csv');
+const fileInput = document.getElementById('input-edit-csv-file');
+const statusPill = document.getElementById('csv-file-status');
+const labelEl = document.getElementById('csv-upload-label');
+
+dropZone?.addEventListener('click', () => fileInput.click());
+dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone?.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    handleCsvFile(e.dataTransfer.files[0]);
+  }
+});
+
+fileInput?.addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) {
+    handleCsvFile(e.target.files[0]);
+  }
+});
+
+function handleCsvFile(file) {
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    alert('Please select a valid .csv file.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    uploadedCsvContent = evt.target.result;
+    if (statusPill) {
+      statusPill.style.display = 'inline-flex';
+      const rowsCount = uploadedCsvContent.split('\n').filter(l => l.trim()).length;
+      statusPill.innerHTML = `✓ <strong>${escHtml(file.name)}</strong> loaded (${rowsCount} rows ready for NLP)`;
+    }
+    if (labelEl) labelEl.textContent = 'Change file (' + file.name + ')';
+    if (window.showToast) showToast('CSV timetable loaded successfully!', 'success');
+  };
+  reader.readAsText(file);
+}
+
+// Open Edit Modal buttons
+document.getElementById('btn-open-edit')?.addEventListener('click', () => openModal('edit-timetable'));
+document.getElementById('hero-btn-edit')?.addEventListener('click', () => openModal('edit-timetable'));
+
+document.getElementById('btn-edit-active-tt')?.addEventListener('click', () => {
+  if (lastResult) {
+    const rows = buildTimetableGridRows(lastResult);
+    uploadedCsvContent = rows.map(r =>
+      r.map(c => `"${String(c || '').replace(/"/g, '""')}"`).join(',')
+    ).join('\r\n');
+    if (statusPill) {
+      statusPill.style.display = 'inline-flex';
+      statusPill.innerHTML = `✓ <strong>Current Active Timetable Loaded</strong> (ready to edit)`;
+    }
+    if (labelEl) labelEl.textContent = 'Using Active Timetable (click to change)';
+  }
+  openModal('edit-timetable');
+});
+
+// Submit Edit
+const btnSubmitEdit = document.getElementById('btn-submit-edit');
+btnSubmitEdit?.addEventListener('click', async () => {
+  if (!uploadedCsvContent) {
+    alert('Please upload a timetable CSV file first.');
+    return;
+  }
+  const instruction = document.getElementById('input-edit-instruction')?.value.trim();
+  if (!instruction) {
+    alert('Please enter your requested changes in plain English.');
+    document.getElementById('input-edit-instruction')?.focus();
+    return;
+  }
+
+  const originalText = btnSubmitEdit.textContent;
+  btnSubmitEdit.disabled = true;
+  btnSubmitEdit.textContent = 'Processing NLP & Re-Evolving…';
+
+  try {
+    const res = await fetch('/api/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        csv_content: uploadedCsvContent,
+        edit_instruction: instruction
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || `Server error ${res.status}`);
+    }
+    const data = await res.json();
+    lastResult = data;
+    closeModal('edit-timetable');
+    displayResultsUI(data);
+    if (data.conflict_detected) {
+      if (window.showToast) showToast('Conflict detected! Timetable was preserved without changes. See suggestions below.', 'error');
+    } else {
+      if (window.showToast) showToast('Timetable updated with NLP successfully!', 'success');
+    }
+  } catch (e) {
+    alert('Error updating timetable: ' + e.message);
+  } finally {
+    btnSubmitEdit.disabled = false;
+    btnSubmitEdit.textContent = originalText;
+  }
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────────────

@@ -1022,6 +1022,143 @@ details[open] .accordion-arrow { transform: rotate(180deg); color: var(--primary
 .toast--out { animation: toastOut 250ms ease forwards; }
 @keyframes toastOut { to { opacity: 0; transform: translateX(30px); } }
 
+/* ─── NLP STYLING & EDIT MODAL ───────────────────────────────────── */
+.badge-nlp {
+  display: inline-block;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  margin-left: 6px;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+.form-textarea {
+  width: 100%;
+  border: 1.5px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface);
+  line-height: 1.5;
+  outline: none;
+  transition: var(--transition);
+  box-sizing: border-box;
+}
+.form-textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(61,90,241,0.08);
+}
+.nlp-sample-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sample-chip {
+  cursor: pointer;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  font-size: 0.72rem;
+  color: var(--text-2);
+  font-weight: 500;
+  transition: var(--transition);
+  user-select: none;
+}
+.sample-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-lt);
+}
+.nlp-tech-pill {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.csv-drop-zone {
+  border: 2px dashed var(--border-2);
+  border-radius: var(--radius);
+  padding: 24px 16px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface-2);
+  transition: var(--transition);
+}
+.csv-drop-zone:hover, .csv-drop-zone.dragover {
+  border-color: var(--primary);
+  background: var(--primary-lt);
+}
+.file-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: var(--success-lt);
+  color: var(--success);
+  border: 1px solid #a7f3d0;
+}
+.nlp-badge-rate {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: var(--success-lt);
+  color: var(--success);
+  border: 1px solid #a7f3d0;
+}
+.nlp-eval-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nlp-eval-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+.nlp-eval-status {
+  font-weight: 700;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+}
+.nlp-eval-status--satisfied {
+  background: var(--success-lt);
+  color: var(--success);
+  border: 1px solid #a7f3d0;
+}
+.nlp-eval-status--violated {
+  background: var(--danger-lt);
+  color: var(--danger);
+  border: 1px solid #fecaca;
+}
+
 /* ─── FOOTER ─────────────────────────────────────────────────────── */
 .footer {
   text-align: center; padding: 32px 20px;

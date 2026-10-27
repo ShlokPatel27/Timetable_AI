@@ -27,17 +27,11 @@
     </svg>
     <span class="logo-text">Timetable<span class="accent">AI</span></span>
   </div>
-  <div class="nav-center">
-    <div class="status-pill" id="app-status-pill" data-status="idle">
-      <span class="status-dot"></span>
-      <span id="app-status-text">Ready</span>
-      <span id="elapsed-display" class="elapsed" hidden></span>
-    </div>
-  </div>
+  <div class="nav-center"></div>
   <div class="nav-right">
-    <span class="version-label">GA Engine v3</span>
-    <button class="shortcut-pill" id="btn-shortcut" title="Ctrl+Enter to run">
-      <kbd>Ctrl</kbd><kbd>↵</kbd>
+    <button class="btn btn-sm btn-secondary" id="btn-open-edit" style="display:inline-flex;align-items:center;gap:6px;" title="Upload an existing timetable CSV and edit it with plain English">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      Edit Your Timetable
     </button>
   </div>
 </nav>
@@ -257,11 +251,40 @@
     </div>
   </div>
 
-  <!-- ── 07 GA PARAMETERS ───────────────────────────────────────── -->
+  <!-- ── 07 NLP SOFT CONSTRAINTS (PLAIN ENGLISH) ──────────────── -->
   <div class="section-card">
     <div class="section-header">
       <div class="section-title-group">
         <span class="section-badge">07</span>
+        <div>
+          <div class="section-title">Natural Language Soft Constraints <span class="badge-nlp">NLP</span></div>
+          <div class="section-subtitle">Type constraints in plain English — the NLP engine understands faculty, course, room, and time preferences</div>
+        </div>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="form-group">
+        <label class="form-label">Plain English Constraints (Multi-sentence supported)</label>
+        <textarea id="nlp-constraints-input" class="form-textarea" rows="4" placeholder="e.g.&#10;Prof. Sharma prefers morning slots on Monday and Wednesday.&#10;Schedule Physics before lunch only.&#10;Keep Classroom 101 for Data Structures.&#10;Batch A prefers Physics Lab on Tuesday morning."></textarea>
+        <div class="nlp-sample-chips" style="margin-top:10px;">
+          <span class="sample-chip" onclick="window.addNlpConstraint('Prof. Sharma prefers morning slots on Monday and Wednesday')">+ Prof. Sharma morning preference</span>
+          <span class="sample-chip" onclick="window.addNlpConstraint('Schedule Physics before lunch only')">+ Physics before lunch</span>
+          <span class="sample-chip" onclick="window.addNlpConstraint('Keep Classroom 101 for Data Structures')">+ Classroom 101 for DS</span>
+          <span class="sample-chip" onclick="window.addNlpConstraint('Batch A prefers Physics Lab on Tuesday morning')">+ Batch A Tuesday Lab</span>
+          <span class="sample-chip" onclick="window.addNlpConstraint('Keep Friday last slot free for seminar')">+ Friday free last slot</span>
+        </div>
+        <div class="nlp-tech-pill">
+          <span>⚡ <strong>NLP Pipeline:</strong> NLTK Tokenization &amp; Lemmatization • TF-IDF Vectorization • Scikit-Learn Logistic Regression Intent Classifier • VADER Sentiment Polarity</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 08 GA PARAMETERS ───────────────────────────────────────── -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-title-group">
+        <span class="section-badge">08</span>
         <div>
           <div class="section-title">GA Parameters</div>
           <div class="section-subtitle">Genetic Algorithm tuning</div>
@@ -299,11 +322,11 @@
   </div>
 
 
-  <!-- ── 08 DOWNLOADS ──────────────────────────────────────────── -->
+  <!-- ── 09 DOWNLOADS ──────────────────────────────────────────── -->
   <div class="section-card">
     <div class="section-header">
       <div class="section-title-group">
-        <span class="section-badge">08</span>
+        <span class="section-badge">09</span>
         <div>
           <div class="section-title">Downloads</div>
           <div class="section-subtitle">Export your generated timetable after running the GA</div>
@@ -351,6 +374,7 @@
       <span class="pill">🔬 Batch Lab Scheduling</span>
       <span class="pill">📥 CSV Export</span>
       <span class="pill">📊 Excel Export</span>
+      <button class="pill" id="hero-btn-edit" style="cursor:pointer;border:1px dashed var(--primary);background:var(--primary-lt);color:var(--primary);font-weight:600;">✏ Edit Existing Timetable (Upload CSV)</button>
     </div>
   </section>
 
@@ -415,6 +439,10 @@
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
             Excel
           </button>
+          <button class="btn btn-sm btn-secondary" id="btn-edit-active-tt" title="Make changes to this timetable in plain English">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Edit with NLP
+          </button>
         </div>
       </div>
       <div class="result-panel-body">
@@ -451,6 +479,20 @@
           </thead>
           <tbody></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- NLP Constraints Evaluation Panel -->
+    <div class="result-panel anim-section" id="nlp-results-panel" hidden>
+      <div class="result-panel-header">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="result-panel-title">NLP Soft Constraints Evaluation</span>
+          <span class="nlp-badge-rate" id="nlp-rate-badge">100% Satisfied</span>
+        </div>
+        <span id="nlp-mode-indicator" style="font-size:0.75rem;color:var(--text-3);font-family:var(--font-mono);"></span>
+      </div>
+      <div class="result-panel-body" style="padding:16px 22px;">
+        <div id="nlp-eval-list" class="nlp-eval-list"></div>
       </div>
     </div>
 
@@ -598,6 +640,45 @@
   </div>
 </div>
 
+<!-- Edit Existing Timetable Modal (NLP) -->
+<div class="modal-overlay" id="modal-edit-timetable" style="display:none;">
+  <div class="modal" style="max-width:620px;">
+    <div class="modal-header">
+      <span class="modal-title">✏ Edit Timetable with NLP</span>
+      <button class="modal-close" onclick="closeModal('edit-timetable')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- CSV Upload Area -->
+      <div class="form-group">
+        <label class="form-label">Upload a previously generated timetable CSV</label>
+        <div id="drop-zone-csv" class="csv-drop-zone">
+          <input type="file" id="input-edit-csv-file" accept=".csv" style="display:none;" />
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--primary);margin-bottom:8px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div id="csv-upload-label" style="font-size:0.92rem;font-weight:600;color:var(--text);">Click to browse or drag &amp; drop .csv file</div>
+          <div style="font-size:0.75rem;color:var(--text-3);margin-top:4px;">Accepts any TimetableAI CSV export</div>
+        </div>
+        <div id="csv-file-status" class="file-status-pill" style="display:none;"></div>
+      </div>
+
+      <!-- Plain English change instructions -->
+      <div class="form-group" style="margin-top:18px;">
+        <label class="form-label">What would you like to change? (Plain English)</label>
+        <textarea id="input-edit-instruction" class="form-textarea" rows="4" style="min-height:90px;" placeholder="e.g.&#10;Move Data Structures to Friday morning&#10;Schedule Mathematics in morning slots only&#10;Prof. Sharma prefers Monday and Wednesday for lectures"></textarea>
+        <div class="nlp-sample-chips" style="margin-top:10px;">
+          <span class="sample-chip" onclick="window.applySampleEdit('Move Data Structures to Friday morning')">+ Move Data Structures to Friday morning</span>
+          <span class="sample-chip" onclick="window.applySampleEdit('Schedule Mathematics in morning slots only')">+ Math in morning slots</span>
+          <span class="sample-chip" onclick="window.applySampleEdit('Prof. Sharma prefers Monday and Wednesday for lectures')">+ Prof. Sharma Mon &amp; Wed</span>
+          <span class="sample-chip" onclick="window.applySampleEdit('Keep Friday last slot free for seminar')">+ Friday free last slot</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('edit-timetable')">Cancel</button>
+      <button class="btn btn-primary" id="btn-submit-edit">Update Timetable with NLP</button>
+    </div>
+  </div>
+</div>
+
 <!-- ─── SCRIPTS ───────────────────────────────────────────────────── -->
 <!-- SheetJS with fallback CDN to ensure Excel export works in all environments -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
@@ -606,7 +687,7 @@
     document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>');
   }
 </script>
-<script src="script.js?v=4.1"></script>
+<script src="script.js?v=4.5"></script>
 
 <script>
 (function() {
@@ -646,29 +727,39 @@
   let elapsedInterval = null, startTime = 0;
 
   window.setAppState = function(state) {
-    statusPill.setAttribute('data-status', state);
+    if (statusPill) statusPill.setAttribute('data-status', state);
     if (state === 'running') {
-      statusText.textContent = 'Running GA…';
-      startTime = Date.now(); elapsedEl.hidden = false; elapsedEl.textContent = '0s';
-      elapsedInterval = setInterval(() => { elapsedEl.textContent = Math.floor((Date.now()-startTime)/1000)+'s'; }, 500);
+      if (statusText) statusText.textContent = 'Running GA…';
+      startTime = Date.now();
+      if (elapsedEl) { elapsedEl.hidden = false; elapsedEl.textContent = '0s'; }
+      elapsedInterval = setInterval(() => { if (elapsedEl) elapsedEl.textContent = Math.floor((Date.now()-startTime)/1000)+'s'; }, 500);
       if (idleState) idleState.hidden = true;
-      skeleton.hidden = false; results.hidden = true;
+      if (skeleton) skeleton.hidden = false;
+      if (results) results.hidden = true;
     } else if (state === 'done') {
       clearInterval(elapsedInterval);
-      statusText.textContent = 'Done';
-      elapsedEl.textContent = Math.floor((Date.now()-startTime)/1000)+'s';
-      skeleton.hidden = true;
-      results.querySelectorAll('.anim-section').forEach((s,i) => {
-        s.style.animationDelay = (i*0.07)+'s';
-        s.classList.add('anim-enter');
-      });
+      if (statusText) statusText.textContent = 'Done';
+      if (elapsedEl) elapsedEl.textContent = Math.floor((Date.now()-startTime)/1000)+'s';
+      if (idleState) idleState.hidden = true;
+      if (skeleton) skeleton.hidden = true;
+      if (results) {
+        results.hidden = false;
+        results.querySelectorAll('.anim-section').forEach((s,i) => {
+          s.style.animationDelay = (i*0.05)+'s';
+          s.classList.add('anim-enter');
+        });
+      }
     } else if (state === 'error') {
-      clearInterval(elapsedInterval); statusText.textContent = 'Failed';
-      elapsedEl.hidden = true; skeleton.hidden = true;
+      clearInterval(elapsedInterval);
+      if (statusText) statusText.textContent = 'Failed';
+      if (elapsedEl) elapsedEl.hidden = true;
+      if (skeleton) skeleton.hidden = true;
       if (idleState) idleState.hidden = false;
     } else {
-      clearInterval(elapsedInterval); statusText.textContent = 'Ready';
-      elapsedEl.hidden = true; skeleton.hidden = true;
+      clearInterval(elapsedInterval);
+      if (statusText) statusText.textContent = 'Ready';
+      if (elapsedEl) elapsedEl.hidden = true;
+      if (skeleton) skeleton.hidden = true;
     }
   };
 
@@ -685,7 +776,6 @@
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey||e.metaKey) && e.key==='Enter') { e.preventDefault(); if (btnRun&&!btnRun.disabled) btnRun.click(); }
   });
-  document.getElementById('btn-shortcut')?.addEventListener('click', () => { if (btnRun&&!btnRun.disabled) btnRun.click(); });
 
   /* ── VIOLATIONS COLOR ──────────────────────────────────────── */
   const violCard = document.querySelector('#stat-violations .stat-card__value');
